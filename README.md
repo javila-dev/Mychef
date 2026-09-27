@@ -108,10 +108,13 @@ declina una solicitud, la API la reintenta con otro modelo automáticamente.
 
 - **Colores**: verde huerta como color principal, fondo de papel de lino, y acentos en miel, terracota
   y salvia. Tiene modo oscuro automático (útil de noche en la tablet).
-- **Letras**: *Fraunces* para títulos (una serif cálida, de recetario) y *Atkinson Hyperlegible*
-  para el texto, diseñada para leerse fácil. Ambas vienen incluidas en `static/fonts/` (licencia SIL OFL),
-  así que funcionan aunque la tablet no tenga internet.
-- **Íconos** dibujados para la app, en lugar de emojis genéricos en los botones.
+- **Letras**: *Alegreya* para títulos (serif caligráfica de Huerta Tipográfica, con aire de recetario
+  escrito a mano) y *Atkinson Hyperlegible* para el texto, diseñada para leerse fácil. Ambas vienen
+  incluidas en `static/fonts/` (licencia SIL OFL), así que funcionan aunque la tablet no tenga internet.
+- **Íconos** dibujados para la app (también los de las tareas), en lugar de emojis.
+- Pulida con las guías de [Impeccable](https://impeccable.style): sin sombras decorativas ni adornos,
+  botones que muestran "procesando" y no registran dos veces con un doble toque, pantallas de carga
+  y de error con lenguaje de la casa, y soporte para "reducir movimiento" del sistema.
 - Las **confirmaciones y formularios** se abren en ventanas (modales) que se cierran con la X,
   con Esc o tocando fuera; nunca con los cuadros de diálogo del navegador.
 - Las cantidades se muestran como en la cocina: "½ taza", "1 ⅓ unidades".

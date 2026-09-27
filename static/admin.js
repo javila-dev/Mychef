@@ -2,7 +2,8 @@
 
 import {
   $, $$, REASON_TEXT, addDays, api, cap, esc, fmtDay, fmtMoney, fmtQty, isoDate, mondayOf, safe,
-  compressImage, confirmModal, fmtAmount, fmtUnit, icon, modal as formModal, toPantryLine, toast,
+  CHORE_ICONS, choreIcon, compressImage, confirmModal, fmtAmount, fmtUnit, icon, modal as formModal,
+  toPantryLine, toast, withBusy,
 } from "./common.js";
 
 const view = $("#view");
@@ -131,7 +132,7 @@ function autoplanDialog() {
       <div class="row"><button class="primary" id="go">Planear</button></div>
     </div>`);
   $("#x").onclick = closeModal;
-  $("#go").onclick = () => safe(async () => {
+  $("#go").onclick = (ev) => safe(() => withBusy(ev.currentTarget, async () => {
     const meals = $$("input[name=meal]:checked", modalBody).map((i) => i.value);
     if (!meals.length) return toast("Elige al menos una comida");
     const created = await api("/api/menu/autoplan", {
@@ -141,7 +142,7 @@ function autoplanDialog() {
     closeModal();
     toast(created.length ? `Se agregaron ${created.length} comidas` : "No hay recetas para esos espacios (o ya están llenos)");
     refresh();
-  });
+  }));
 }
 
 async function pickRecipeDialog(day, meal) {
@@ -161,11 +162,11 @@ async function pickRecipeDialog(day, meal) {
       </li>`).join("")}</ul>`
       : `<p class="empty">No tienen recetas marcadas para ${esc(meal)}. Agrégalas en la pestaña Recetas.</p>`}`);
   $("#x").onclick = closeModal;
-  $$("[data-pick]", modalBody).forEach((b) => b.onclick = () => safe(async () => {
+  $$("[data-pick]", modalBody).forEach((b) => b.onclick = () => safe(() => withBusy(b, async () => {
     await api("/api/menu", { method: "POST", json: { day, meal_type: meal, recipe_id: +b.dataset.pick, servings: +$("#pk-serv").value || null } });
     closeModal();
     refresh();
-  }));
+  })));
 }
 
 // ------------------------------------------------------------------ ¿qué cocino?
@@ -305,12 +306,12 @@ async function showRecipe(id, servings) {
     closeModal();
     refresh();
   });
-  $("#cooked").onclick = () => safe(async () => {
+  $("#cooked").onclick = (ev) => safe(() => withBusy(ev.currentTarget, async () => {
     const res = await api(`/api/recipes/${id}/cook`, { method: "POST", json: { servings: n } });
     toast(`Registrado. Se descontaron ${res.pantry_changes.length} ingredientes de la despensa.`);
     closeModal();
     refresh();
-  });
+  }));
 }
 
 async function recipeForm(recipe = null) {
@@ -360,7 +361,7 @@ async function recipeForm(recipe = null) {
 
   $("#rf").onsubmit = (e) => {
     e.preventDefault();
-    safe(async () => {
+    safe(() => withBusy($("button[type=submit]", e.target), async () => {
       const f = e.target;
       const lines = $$(".ing-row", rows).map((d) => ({
         name: $(".ing-name", d).value.trim(),
@@ -383,7 +384,7 @@ async function recipeForm(recipe = null) {
       toast("Receta guardada");
       if (current === "recipes") await renderRecipes();
       showRecipe(saved.id);
-    });
+    }));
   };
 }
 
@@ -587,7 +588,7 @@ function showScanResult(res) {
     <div class="row" style="margin-top:.75rem">
       <button class="primary" id="s-save">Sumar a la despensa</button>
     </div>`;
-  $("#s-save").onclick = () => safe(async () => {
+  $("#s-save").onclick = (ev) => safe(() => withBusy(ev.currentTarget, async () => {
     const payload = $$("tr[data-idx]", box).filter((tr) => $(".s-ok", tr).checked).map((tr) => ({
       name: $(".s-name", tr).value,
       quantity: parseFloat($(".s-qty", tr).value) || 0,
@@ -599,7 +600,7 @@ function showScanResult(res) {
     closeModal();
     toast(`Se agregaron ${payload.length} ingredientes`);
     renderPantry();
-  });
+  }));
 }
 
 // ------------------------------------------------------------------ compras
@@ -643,7 +644,8 @@ async function renderShopping() {
     await api(`/api/shopping/extra/${b.dataset.rm}`, { method: "DELETE" });
     refresh();
   }));
-  $("#bought").onclick = () => safe(async () => {
+  $("#bought").onclick = (ev) => safe(async () => {
+    const btn = ev.currentTarget;
     const checked = $$("input[data-idx]:checked", view).map((c) => list[+c.dataset.idx]);
     const items = checked.length ? checked : list;
     if (!await confirmModal({
@@ -651,7 +653,7 @@ async function renderShopping() {
       text: checked.length ? `${checked.length} productos se suman a la despensa.` : "No marcaste nada, así que se suma toda la lista.",
       ok: "Pasar a la despensa",
     })) return;
-    await api("/api/pantry/bulk", { method: "POST", json: items.map(toPantryLine) });
+    await withBusy(btn, () => api("/api/pantry/bulk", { method: "POST", json: items.map(toPantryLine) }));
     toast(`${items.length} ingredientes agregados a la despensa`);
     refresh();
   });
@@ -700,7 +702,8 @@ async function renderHouse() {
       <table><thead><tr><th></th><th>Tarea</th><th>Frecuencia (días)</th><th>¿A quién le toca?</th><th>Próxima</th><th></th></tr></thead>
         <tbody>${chores.map((c) => `
           <tr data-id="${c.id}">
-            <td><select data-f="emoji">${META.chore_emojis.map((e) => `<option ${e === c.emoji ? "selected" : ""}>${e}</option>`).join("")}</select></td>
+            <td><span class="row" style="flex-wrap:nowrap;color:var(--green-ink)">${choreIcon(c.emoji, 24)}
+              <select data-f="emoji" aria-label="Dibujo">${META.chore_emojis.map((e) => `<option value="${e}" ${e === c.emoji ? "selected" : ""}>${CHORE_ICONS[e]?.[1] ?? e}</option>`).join("")}</select></span></td>
             <td><input data-f="name" value="${esc(c.name)}"></td>
             <td><input data-f="every_days" type="number" min="1" value="${c.every_days}" style="width:5rem" title="${every(c.every_days)}"></td>
             <td><select data-f="who">${memberOpts(c.member_id, c.rotate)}</select></td>
@@ -712,8 +715,8 @@ async function renderHouse() {
 
   const whoFields = (v) => v === "rotate" ? { member_id: null, rotate: true } : { member_id: v ? +v : null, rotate: false };
   const FACES = ["👩", "👨", "👧", "👦", "👵", "👴", "🧑", "👶", "🧒", "🐶", "🐱", "🙂"];
-  const pickGrid = (name, list, selected) => `<div class="pick">${list.map((e) => `
-    <label><input type="radio" name="${name}" value="${e}" ${e === selected ? "checked" : ""}><span>${e}</span></label>`).join("")}</div>`;
+  const pickGrid = (name, list, selected, draw = (e) => e) => `<div class="pick">${list.map((e) => `
+    <label title="${esc(CHORE_ICONS[e]?.[1] ?? "")}"><input type="radio" name="${name}" value="${e}" ${e === selected ? "checked" : ""}><span>${draw(e)}</span></label>`).join("")}</div>`;
 
   $("#house-name").onclick = () => {
     formModal({
@@ -755,7 +758,7 @@ async function renderHouse() {
       title: "Nueva tarea de la casa",
       body: `<form id="cf" class="stack">
         <label class="field">¿Qué hay que hacer?<input name="name" required maxlength="80" autocomplete="off" placeholder="Ej: Sacar la basura"></label>
-        <div class="field">Dibujo${pickGrid("emoji", META.chore_emojis, META.chore_emojis[0])}</div>
+        <div class="field">Dibujo${pickGrid("emoji", META.chore_emojis, META.chore_emojis[0], (e) => choreIcon(e, 26))}</div>
         <div class="form-grid">
           <label class="field">¿Cada cuánto?<select name="every_days">
             ${[[1, "Todos los días"], [2, "Cada 2 días"], [3, "Cada 3 días"], [7, "Cada semana"], [14, "Cada 15 días"], [30, "Cada mes"]]

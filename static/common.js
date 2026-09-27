@@ -13,7 +13,12 @@ export async function api(path, opts = {}) {
     init.body = JSON.stringify(opts.json);
     init.headers = { "Content-Type": "application/json" };
   }
-  const res = await fetch(path, init);
+  let res;
+  try {
+    res = await fetch(path, init);
+  } catch {
+    throw new Error("No hay conexión con el computador de la casa. Revisen el wifi e intenten de nuevo.");
+  }
   if (res.status === 401 && path !== "/api/login") {
     await askPin();
     return api(path, opts);
@@ -21,7 +26,9 @@ export async function api(path, opts = {}) {
   if (res.status === 204) return null;
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    let msg = data?.detail ?? `Error ${res.status}`;
+    let msg = data?.detail ?? (res.status >= 500
+      ? "Algo salió mal en el computador de la casa. Intenten de nuevo en un momento."
+      : "No se pudo completar. Intenten de nuevo.");
     if (Array.isArray(msg)) msg = msg.map((d) => d.msg).join("; ");
     throw new Error(msg);
   }
@@ -214,7 +221,42 @@ const ICONS = {
   dot: '<circle cx="12" cy="12" r="4" fill="currentColor"/>',
   chevron: '<path d="m9.5 5.5 6.5 6.5-6.5 6.5"/>',
   cart: '<path d="M3.5 4.5h2.2l2 11h10.8l1.8-8H7"/><circle cx="9.5" cy="19.3" r="1.3"/><circle cx="17" cy="19.3" r="1.3"/>',
+  bin: '<path d="M5 7.5h14M9.5 7.5V5h5v2.5M6.5 7.5l1 12a1.5 1.5 0 0 0 1.5 1.4h6a1.5 1.5 0 0 0 1.5-1.4l1-12"/><path d="M10 11v6M14 11v6"/>',
+  laundry: '<path d="M4 9.5h16l-1.5 9.2a2 2 0 0 1-2 1.8h-9a2 2 0 0 1-2-1.8z"/><path d="M4 9.5c2-3 5-5 8-5s6 2 8 5M8 13.5c1.3 1 2.6 1 4 0s2.7-1 4 0"/>',
+  plate: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/>',
+  plant: '<path d="M7.5 14.5h9l-1.3 6h-6.4z"/><path d="M12 14.5V9M12 9c0-3 2-5 5.5-5 0 3-2 5-5.5 5zM12 11c0-2.5-1.8-4.3-4.8-4.3 0 2.6 1.8 4.3 4.8 4.3z"/>',
+  paw: '<ellipse cx="12" cy="15.5" rx="4" ry="3.5"/><circle cx="6.5" cy="10.5" r="1.8"/><circle cx="9.8" cy="6.8" r="1.8"/><circle cx="14.2" cy="6.8" r="1.8"/><circle cx="17.5" cy="10.5" r="1.8"/>',
+  bed: '<path d="M3.5 18.5V6.5M3.5 14.5h17v4M20.5 14.5v-2.5a2.5 2.5 0 0 0-2.5-2.5h-7.5v5"/><circle cx="7" cy="11.5" r="1.8"/>',
+  shower: '<path d="M5 20.5V7a3 3 0 0 1 3-3h1.5a3 3 0 0 1 3 3v.5"/><path d="M9.5 9.5h6a3 3 0 0 0-6 0zM11 13v1M14 13v1M12.5 15.5v1M9.5 15.5v1M15.5 15.5v1"/>',
+  sponge: '<rect x="3.5" y="8.5" width="17" height="10" rx="2.5"/><path d="M3.5 12.5h17M7.5 15.5h.01M11.5 15.5h.01M15.5 15.5h.01M9 5.5l1.5-1.5M14 5.5l1.5-1.5"/>',
+  bulb: '<path d="M9 17.5h6M10 20.5h4M8.5 14c-1.5-1.2-2.5-3-2.5-5a6 6 0 0 1 12 0c0 2-1 3.8-2.5 5-.6.5-1 1.2-1 2v1.5h-5V16c0-.8-.4-1.5-1-2z"/>',
+  box: '<path d="M3.5 8 12 4l8.5 4v8.5L12 20.5l-8.5-4z"/><path d="m3.5 8 8.5 4 8.5-4M12 12v8.5"/>',
 };
+
+// Las tareas se guardan con un emoji (así las crea Administrar); en pantalla se dibujan con íconos propios.
+export const CHORE_ICONS = {
+  "🧹": ["broom", "Barrer"], "🗑️": ["bin", "Basura"], "🧺": ["laundry", "Ropa"], "🍽️": ["plate", "Loza"],
+  "🪴": ["plant", "Plantas"], "🐶": ["paw", "Mascota"], "🛏️": ["bed", "Cama"], "🚿": ["shower", "Baño"],
+  "🧽": ["sponge", "Limpiar"], "🛒": ["cart", "Mercado"], "💡": ["bulb", "Arreglos"], "📦": ["box", "Orden"],
+};
+export function choreIcon(emoji, size = 28) {
+  return icon(CHORE_ICONS[emoji]?.[0] ?? "broom", size);
+}
+
+// Muestra "procesando" en el botón y evita dobles toques mientras dura la acción.
+export async function withBusy(btn, fn) {
+  if (!btn || btn.getAttribute("aria-busy") === "true") return undefined;
+  btn.setAttribute("aria-busy", "true");
+  btn.disabled = true;
+  try {
+    return await fn();
+  } finally {
+    if (btn.isConnected) {
+      btn.removeAttribute("aria-busy");
+      btn.disabled = false;
+    }
+  }
+}
 
 export function icon(name, size = 24) {
   return `<svg class="i" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -251,7 +293,7 @@ export function modal({ title = "", body = "", actions = [], size = "", onOpen =
   $$("[data-m-act]", dlg).forEach((b) => b.onclick = async () => {
     const a = actions[+b.dataset.mAct];
     if (a.onClick) {
-      const r = await a.onClick(dlg);
+      const r = await withBusy(b, () => a.onClick(dlg));
       if (r === false) return;
       close(r === undefined ? a.value ?? true : r);
     } else {
