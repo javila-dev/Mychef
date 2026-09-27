@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from . import household, services, vision
+from . import household, services, vision, voice
 from .auth import AuthMiddleware, check_pin, pin_enabled
 from . import db
 from .db import get_session, init_db
@@ -128,6 +128,11 @@ class ExtraIn(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     quantity: float | None = Field(None, ge=0)
     unit: str | None = None
+
+
+class VoiceIn(BaseModel):
+    text: str = Field(max_length=500)
+    context: dict = Field(default_factory=dict)
 
 
 class PinIn(BaseModel):
@@ -675,6 +680,14 @@ def delete_photo(photo_id: int, session: Session = SessionDep):
     (db.PHOTOS_DIR / item.filename).unlink(missing_ok=True)
     session.delete(item)
     session.commit()
+
+
+# ---------------------------------------------------------------- voz
+
+@app.post("/api/voice")
+def voice_command(data: VoiceIn, session: Session = SessionDep):
+    """Interpreta una frase dicha en la cocina y ejecuta lo que corresponde."""
+    return voice.interpret(session, data.text, data.context).as_dict()
 
 
 # ---------------------------------------------------------------- hoy y tareas

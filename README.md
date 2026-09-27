@@ -80,6 +80,37 @@ Los datos quedan en `./data/mychef.db` (un archivo SQLite; para respaldar basta 
    mejor la app gratuita **Fully Kiosk Browser**, que la deja en pantalla completa, siempre encendida y
    sin poder salirse por error. Un soporte magnético para nevera y un cable largo completan el montaje.
 
+### Comandos de voz
+
+Toquen **Hablar** (junto a la hora o arriba en cada pantalla) y digan, por ejemplo:
+
+| Para… | Digan |
+|---|---|
+| Anotar lo que se acabó | «se acabó la leche y los huevos» |
+| Agregar a la lista | «agrega pan y jabón a la lista», «necesitamos arepas» |
+| Marcar una tarea | «ya saqué la basura», «Sofi ya regó las plantas» |
+| Saber qué hay | «¿qué hay de almuerzo?», «¿qué falta comprar?», «¿qué se vence?», «¿qué tareas hay?» |
+| Decidir qué cocinar | «¿qué cocino?», «abre la receta de lentejas» |
+| Temporizadores | «pon un temporizador de diez minutos para el arroz», «¿cuánto falta?», «cancela el temporizador» |
+| Corregir | «deshacer» (o el botón **Deshacer** que aparece) |
+
+**Manos libres**: dentro de una receta, toquen **Manos libres** y la tablet queda escuchando mientras
+cocinan: «siguiente», «anterior», «repite», «¿cuánta sal lleva?», «ingredientes», «terminé». La
+tablet lee cada paso en voz alta; si le hablan encima, se calla y obedece.
+
+Los temporizadores aparecen arriba en todas las pantallas y, al terminar, suenan y lo dicen en voz alta.
+
+Requisitos del navegador para la voz:
+- **Chrome** (o Fully Kiosk Browser) en la tablet, **con internet**: el reconocimiento de voz de
+  Chrome usa los servidores de Google. Las respuestas habladas funcionan sin internet.
+- **Conexión segura**: el navegador solo presta el micrófono en `https://` o en `localhost`. En la red
+  de la casa la forma más sencilla es, en la tablet, abrir `chrome://flags/#unsafely-treat-insecure-origin-as-secure`,
+  escribir la dirección de la app (por ejemplo `http://192.168.1.20:8000`), activarlo y reiniciar Chrome.
+  Si la app está publicada en internet con HTTPS, no hace falta nada.
+
+La frase se interpreta en el computador de la casa con reglas propias (rápido y gratis). Si alguien
+dice algo que no encaja y hay `ANTHROPIC_API_KEY`, Claude la traduce a uno de los comandos conocidos.
+
 ### PIN de la casa (recomendado si la app está en internet)
 
 ```bash
@@ -139,10 +170,12 @@ app/
   auth.py      PIN opcional de la casa
   services.py  Escalar recetas, disponibilidad, sugerencias, plan semanal, compras
   units.py     Unidades y conversiones
-  vision.py    Reconocimiento con Claude (facturas, despensa y recetas)
+  vision.py    Reconocimiento con Claude (facturas, despensa, recetas y frases de voz difíciles)
+  voice.py     Comandos de voz: entiende la frase y ejecuta la acción
   seed.py      Datos de ejemplo
 static/        index.html + hub.js/hub.css: pantalla de la casa · admin.html + admin.js: Administrar
                common.js: íconos, avatares, modales y utilidades · styles.css: base visual
+               voice.js: micrófono, voz hablada, manos libres y temporizadores
                wallpaper.svg: fondo sin fotos · fonts/: Lexend
 tests/         Pruebas
 ```

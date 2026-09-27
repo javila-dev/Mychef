@@ -7,6 +7,10 @@ import {
   $, $$, api, avatar, cap, choreIcon, compressImage, confirmModal, esc, fmtAmount, fmtMoney, icon, isoDate,
   modal, mondayOf, safe, toPantryLine, toast, withBusy,
 } from "./common.js";
+import {
+  HandsFree, Timers, VOICE_SECURE, VOICE_SUPPORTED, listenOnce, speak, stopListening, stopRinging,
+  stopSpeaking,
+} from "./voice.js";
 
 const app = $("#app");
 const IDLE_MS = 2 * 60 * 1000;
@@ -23,6 +27,7 @@ let busy = false; // mientras se lee una factura no se vuelve al inicio
 const SCREENS = { home: renderHome, shopping: renderShopping, what: renderWhat, cook: renderCook, chores: renderChores };
 
 function go(name, params = {}) {
+  if (name !== "cook") stopCookVoice();
   screen = name;
   document.body.classList.toggle("at-home", name === "home");
   window.scrollTo(0, 0);
@@ -31,9 +36,14 @@ function go(name, params = {}) {
 const home = () => go("home");
 const refresh = () => (screen === "home" ? home() : null);
 
-function head(title, back = "Volver al inicio") {
+function micButton(extra = "") {
+  return `<button class="mic ${extra}" data-mic aria-label="Hablar">${icon("mic", 28)}<span>Hablar</span></button>`;
+}
+
+function head(title, back = "Volver al inicio", tools = "") {
   return `<div class="screen-head">
-    <button class="back" data-back aria-label="${back}">${icon("back", 28)}</button><h1>${title}</h1></div>`;
+    <button class="back" data-back aria-label="${back}">${icon("back", 28)}</button><h1>${title}</h1>
+    <div class="head-tools">${tools}${micButton()}</div></div>`;
 }
 function bindBack(to = home) {
   $$("[data-back]", app).forEach((b) => b.onclick = to);
@@ -43,7 +53,7 @@ let idleTimer = null;
 function resetIdle() {
   clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
-    if (busy) return resetIdle();
+    if (busy || handsFree?.active || document.querySelector("dialog[open] .ring")) return resetIdle();
     $$("dialog.m[open]").forEach((d) => { d.close(); d.remove(); });
     if (screen !== "home") home();
   }, IDLE_MS);
@@ -168,7 +178,7 @@ async function renderHome() {
     <div class="home">
       <div class="left">
         <header class="time-block">
-          <div class="clock" id="clock">${clock()}</div>
+          <div class="clock-row"><div class="clock" id="clock">${clock()}</div>${micButton("on-photo")}</div>
           <h1 class="hello">${greeting()}</h1>
           <div class="today-line">${date} · ${esc(META.house_name)}</div>
         </header>
@@ -631,13 +641,26 @@ const STATUS = {
   poco: ["dot", "st-poco", "No alcanza"], falta: ["close", "st-falta", "No hay"],
 };
 
-async function renderCook({ recipeId, servings, entryId = null, back = null }) {
+let COOK = null;       // receta abierta: pasos, paso actual, porciones (para la voz)
+let handsFree = null;
+
+function stopCookVoice() {
+  handsFree?.stop();
+  handsFree = null;
+  COOK = null;
+}
+
+async function renderCook({ recipeId, servings, entryId = null, back = null, step = 0 }) {
   servings = servings || META.household_size;
   const r = await api(`/api/recipes/${recipeId}?servings=${servings}`);
   const status = Object.fromEntries(r.availability.items.map((i) => [i.ingredient_id, i.status]));
   const steps = r.instructions.split("\n").map((s) => s.replace(/^\s*\d+[.)-]\s*/, "").trim()).filter(Boolean);
   const params = { recipeId, entryId, back };
-  app.innerHTML = `${head(esc(r.name))}
+  const wasHandsFree = Boolean(handsFree?.active);
+  COOK = { recipeId, servings: r.scaled_to, steps, idx: Math.min(step, Math.max(steps.length - 1, 0)), name: r.name };
+  app.innerHTML = `${head(esc(r.name), "Volver",
+      VOICE_SUPPORTED ? `<button class="handsfree ${wasHandsFree ? "on" : ""}" id="hf" aria-pressed="${wasHandsFree}">${icon("mic", 22)}<span>Manos libres</span></button>` : "")}
+    <p class="hf-hint" id="hf-hint" ${wasHandsFree ? "" : "hidden"}>Escuchando. Digan «<b>siguiente</b>», «<b>repite</b>» o «<b>¿cuánta sal lleva?</b>»</p>
     <div class="servings">Para
       <button id="minus" aria-label="Menos personas">${icon("minus", 26)}</button><strong>${r.scaled_to}</strong>
       <button id="plus" aria-label="Más personas">${icon("plus", 26)}</button> personas
@@ -654,17 +677,61 @@ async function renderCook({ recipeId, servings, entryId = null, back = null }) {
         }).join("")}
       </section>
       <section class="panel">
-        <div class="panel-title"><h2>Preparación</h2></div>
-        ${steps.length ? `<ol class="steps">${steps.map((s) => `<li><span>${esc(s)}</span></li>`).join("")}</ol>` : `<p class="empty-note">Sin pasos escritos.</p>`}
+        <div class="panel-title"><h2>Preparación</h2>
+          ${steps.length > 1 ? `<div class="step-nav"><button id="prev" aria-label="Paso anterior">${icon("back", 22)}</button>
+            <span id="step-count">Paso ${COOK.idx + 1} de ${steps.length}</span>
+            <button id="next" aria-label="Paso siguiente">${icon("chevron", 22)}</button></div>` : ""}</div>
+        ${steps.length ? `<ol class="steps">${steps.map((s, i) => `<li class="${i === COOK.idx ? "current" : ""}" data-step="${i}"><span>${esc(s)}</span></li>`).join("")}</ol>` : `<p class="empty-note">Sin pasos escritos.</p>`}
         ${r.notes ? `<div class="tip">${icon("leaf", 22)}<span>${esc(r.notes)}</span></div>` : ""}
       </section>
     </div>
     <div class="bottom-bar"><button class="primary big" id="done">${icon("check")} Terminé de cocinar</button></div>`;
   bindBack(back ? () => go("what", back) : home);
-  $("#minus").onclick = () => r.scaled_to > 1 && go("cook", { ...params, servings: r.scaled_to - 1 });
-  $("#plus").onclick = () => go("cook", { ...params, servings: r.scaled_to + 1 });
-  $("#done").onclick = (ev) => safe(async () => {
-    const btn = ev.currentTarget;
+  $("#minus").onclick = () => r.scaled_to > 1 && go("cook", { ...params, servings: r.scaled_to - 1, step: COOK.idx });
+  $("#plus").onclick = () => go("cook", { ...params, servings: r.scaled_to + 1, step: COOK.idx });
+  $("#prev")?.addEventListener("click", () => showStep(COOK.idx - 1, false));
+  $("#next")?.addEventListener("click", () => showStep(COOK.idx + 1, false));
+  $$("[data-step]", app).forEach((li) => li.onclick = () => showStep(+li.dataset.step, false));
+  $("#hf")?.addEventListener("click", () => toggleHandsFree());
+  if (wasHandsFree) setHandsFreeUI(true);
+  $("#done").onclick = (ev) => finishCooking(ev.currentTarget, r, { recipeId, entryId, servings });
+}
+
+function showStep(i, read = true) {
+  if (!COOK || !COOK.steps.length) return;
+  COOK.idx = Math.max(0, Math.min(i, COOK.steps.length - 1));
+  $$("[data-step]", app).forEach((li) => li.classList.toggle("current", +li.dataset.step === COOK.idx));
+  const c = $("#step-count");
+  if (c) c.textContent = `Paso ${COOK.idx + 1} de ${COOK.steps.length}`;
+  $(`[data-step="${COOK.idx}"]`, app)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  if (read) return say(`Paso ${COOK.idx + 1}. ${COOK.steps[COOK.idx]}`);
+}
+
+function setHandsFreeUI(on) {
+  $("#hf")?.classList.toggle("on", on);
+  $("#hf")?.setAttribute("aria-pressed", String(on));
+  const hint = $("#hf-hint");
+  if (hint) hint.hidden = !on;
+}
+
+function toggleHandsFree() {
+  if (!voiceReady()) return;
+  if (handsFree?.active) {
+    handsFree.stop();
+    handsFree = null;
+    setHandsFreeUI(false);
+    toast("Manos libres apagado");
+    return;
+  }
+  // Si hablan mientras la casa habla, se calla y obedece. Lo que no es comando (incluida su propia voz) se ignora.
+  handsFree = new HandsFree((text) => { stopSpeaking(); handleVoiceText(text, { handsFree: true }); });
+  handsFree.start();
+  setHandsFreeUI(true);
+  showStep(COOK?.idx ?? 0, true);
+}
+
+async function finishCooking(btn, r, { recipeId, entryId, servings }) {
+  await safe(async () => {
     const ok = await confirmModal({
       title: "¿Terminaron de cocinar?",
       text: `Se descuenta de la casa lo que usa «${esc(r.name)}» para ${r.scaled_to} personas.`,
@@ -679,9 +746,136 @@ async function renderCook({ recipeId, servings, entryId = null, back = null }) {
         await api(`/api/recipes/${recipeId}/cook`, { method: "POST", json: { servings: r.scaled_to } });
       }
     });
+    stopCookVoice();
     await doneModal("¡Buen provecho!", "Se descontó lo que se usó de la nevera y la alacena.");
     home();
   });
+}
+
+// ---------------------------------------------------------------- voz
+
+let lastUndo = null;
+// Un solo manejador para todos los botones "Hablar", aunque la pantalla se redibuje.
+document.addEventListener("click", (e) => { if (e.target.closest("[data-mic]")) voiceModal(); });
+
+function voiceReady() {
+  if (VOICE_SUPPORTED && VOICE_SECURE) return true;
+  modal({
+    title: "La voz no está disponible", size: "narrow",
+    body: `<p class="m-text">${!VOICE_SUPPORTED
+      ? "Este navegador no reconoce la voz. En la tablet usen Google Chrome (o Fully Kiosk Browser)."
+      : "El navegador solo deja usar el micrófono en una conexión segura (HTTPS). En Ajustes del README está cómo activarla en la casa."}</p>`,
+    actions: [{ label: "Entendido", tone: "primary" }],
+  });
+  return false;
+}
+
+async function say(text) {
+  if (text) await speak(text);
+}
+
+function voiceModal() {
+  if (!voiceReady()) return;
+  stopRinging();
+  const m = modal({
+    title: "Te escucho…", size: "narrow",
+    body: `<div class="listen"><div class="mic-wave">${icon("mic", 40)}</div>
+      <p class="heard" id="heard">Hablen ahora. Por ejemplo: «se acabó la leche».</p>
+      <p class="reply" id="reply" hidden></p></div>`,
+  });
+  const heard = $("#heard", m.el);
+  const reply = $("#reply", m.el);
+  const title = $(".m-title", m.el);
+  m.done.then(() => stopListening());
+  (async () => {
+    let text = "";
+    try {
+      text = await listenOnce({ onInterim: (t) => { heard.textContent = `«${t}»`; } });
+    } catch (e) {
+      title.textContent = "No pude escuchar";
+      heard.textContent = e.message === "not-allowed"
+        ? "El micrófono está bloqueado. Denle permiso al navegador para usarlo."
+        : "No se oyó bien. Intenten de nuevo, más cerca de la tablet.";
+      $(".mic-wave", m.el).classList.add("idle");
+      return;
+    }
+    $(".mic-wave", m.el).classList.add("idle");
+    if (!text) {
+      title.textContent = "No escuché nada";
+      heard.textContent = "Toquen el micrófono y hablen apenas se abra esta ventana.";
+      setTimeout(() => m.close(), 3500);
+      return;
+    }
+    heard.textContent = `«${text}»`;
+    title.textContent = "Entendido";
+    const res = await handleVoiceText(text, { box: reply });
+    if (!res) return m.close();
+    const keepOpen = Boolean(res.undo);
+    if (keepOpen) {
+      const act = document.createElement("div");
+      act.className = "row";
+      act.style.cssText = "justify-content:center;margin-top:1rem";
+      act.innerHTML = `<button class="btn-plain" id="v-undo">${icon("undo", 20)} Deshacer</button><button class="primary" id="v-ok">${icon("check", 20)} Listo</button>`;
+      $(".listen", m.el).appendChild(act);
+      $("#v-undo", m.el).onclick = async () => { await runUndo(); m.close(); };
+      $("#v-ok", m.el).onclick = () => m.close();
+      setTimeout(() => m.close(), 9000);
+    } else {
+      setTimeout(() => m.close(), res.navigate ? 600 : 2500);
+    }
+  })();
+}
+
+async function runUndo() {
+  if (!lastUndo) return say("No hay nada para deshacer.");
+  const u = lastUndo;
+  lastUndo = null;
+  for (const step of u.steps) {
+    await api(step.url, { method: step.method, ...(step.json ? { json: step.json } : {}) });
+  }
+  toast("Listo, se deshizo");
+  await say(u.speak || "Listo, lo deshice.");
+  if (screen === "home") home();
+}
+
+async function handleVoiceText(text, { box = null, handsFree: hf = false } = {}) {
+  const context = { screen, handsfree: hf, ...(COOK ? { recipe_id: COOK.recipeId, servings: COOK.servings } : {}) };
+  let res;
+  try {
+    res = await api("/api/voice", { method: "POST", json: { text, context } });
+  } catch (e) {
+    toast(e.message, 4000);
+    return null;
+  }
+  if (hf && res.intent === "unknown") return null; // en manos libres se ignora lo que no es comando
+  if (box) { box.hidden = !res.speak; box.textContent = res.speak; }
+
+  switch (res.intent) {
+    case "undo": await runUndo(); return res;
+    case "timer_set": Timers.add(res.data.seconds, res.data.label, res.data.said); break;
+    case "timer_cancel": if (!Timers.count) res.speak = "No hay temporizadores."; Timers.cancelAll(); break;
+    case "timer_query": res.speak = Timers.describe(); if (box) { box.hidden = false; box.textContent = res.speak; } break;
+    case "step_next": return (showStep((COOK?.idx ?? -1) + 1), res);
+    case "step_prev": return (showStep((COOK?.idx ?? 1) - 1), res);
+    case "step_repeat": return (showStep(COOK?.idx ?? 0), res);
+    case "cook_done": $("#done")?.click(); return res;
+    default: break;
+  }
+  if (res.undo?.steps?.length) lastUndo = res.undo;
+
+  const nav = res.navigate;
+  const speaking = say(res.speak);
+  if (nav) {
+    if (nav.screen === "receipt") receiptModal();
+    else if (nav.screen === "photos") photosModal();
+    else if (nav.screen === "cook") go("cook", { recipeId: nav.recipeId });
+    else if (nav.screen === "what") go("what", nav.meal ? { meal: nav.meal } : {});
+    else go(nav.screen);
+  } else if (screen === "home" && ["ran_out", "list_add", "chore_done"].includes(res.intent)) {
+    safe(renderHome);
+  }
+  await speaking;
+  return res;
 }
 
 // ---------------------------------------------------------------- arranque

@@ -98,7 +98,8 @@ def _image_block(data: bytes, media_type: str) -> dict:
     }
 
 
-def _parse(content: list[dict], output_format: type[BaseModel]):
+def _parse(content: list[dict], output_format: type[BaseModel], effort: str | None = None):
+    extra = {"output_config": {"effort": effort}} if effort else {}
     try:
         response = _client().beta.messages.parse(
             model=MODEL,
@@ -107,6 +108,7 @@ def _parse(content: list[dict], output_format: type[BaseModel]):
             fallbacks="default",
             messages=[{"role": "user", "content": content}],
             output_format=output_format,
+            **extra,
         )
     except anthropic.AuthenticationError as e:
         raise VisionError(
@@ -215,3 +217,30 @@ cosas de la casa, "otro" para lo demás (bolsas, propinas, domicilio, descuentos
     content = [_image_block(data, mt) for data, mt in images]
     content.append({"type": "text", "text": prompt})
     return _parse(content, Receipt)
+
+
+class VoiceCanonical(BaseModel):
+    command: str | None
+
+
+def voice_canonical(text: str, recipes: list[str], chores: list[str], screen: str) -> str | None:
+    """Reescribe una frase dicha en la cocina como uno de los comandos que la casa entiende."""
+    prompt = f"""Alguien de la familia le habló a la pantalla de la cocina. El reconocimiento de voz \
+entendió: <frase>{text}</frase>
+Pantalla actual: {screen}. Recetas de la casa: {", ".join(recipes) or "(ninguna)"}. \
+Tareas de la casa: {", ".join(chores) or "(ninguna)"}.
+
+Reescribe la intención como UNO de estos comandos, en español, con los nombres reales de arriba:
+- "se acabó <productos separados por coma>"
+- "agrega <productos separados por coma> a la lista"
+- "ya hice <nombre exacto de la tarea>"
+- "qué hay de <desayuno|almuerzo|cena|comer>"
+- "qué cocino" o "qué hago de <comida>"
+- "abre la receta de <nombre exacto de la receta>"
+- "temporizador de <N> minutos para <qué>"
+- "cancela el temporizador"
+- "qué falta comprar", "qué se vence", "qué tareas hay"
+- en modo cocina: "siguiente", "anterior", "repite", "cuánto <ingrediente> lleva", "ingredientes"
+Si la frase no pide nada de esto o es ruido, command = null. No inventes productos ni tareas."""
+    result = _parse([{"type": "text", "text": prompt}], VoiceCanonical, effort="low")
+    return result.command
