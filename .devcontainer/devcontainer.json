@@ -1,0 +1,17 @@
+{
+  // Para abrir la app desde el celular o cualquier navegador con GitHub Codespaces:
+  // en GitHub → Code → Codespaces → Create codespace. Instala, carga ejemplos y arranca sola.
+  "name": "MyChef",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "postCreateCommand": "pip install -r requirements.txt && python -m app.seed",
+  "postStartCommand": "nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/mychef.log 2>&1 &",
+  "forwardPorts": [8000],
+  "portsAttributes": {
+    "8000": { "label": "MyChef", "onAutoForward": "openBrowser" }
+  },
+  "containerEnv": { "MYCHEF_TZ": "America/Bogota" },
+  // Si guardan ANTHROPIC_API_KEY como secreto de Codespaces, funcionan las fotos con IA.
+  "secrets": {
+    "ANTHROPIC_API_KEY": { "description": "Opcional: para escanear facturas, la nevera y recetas con IA" }
+  }
+}

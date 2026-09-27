@@ -94,6 +94,18 @@ Para probar con recetas de ejemplo antes de cargar las suyas:
 python -m app.seed
 ```
 
+### Desde el celular, sin computador (GitHub Codespaces)
+
+1. En el navegador del celular abran el repositorio en github.com, elijan la rama, y toquen
+   **Code → Codespaces → Create codespace**.
+2. Esperen unos 2 minutos: instala todo, carga las recetas de ejemplo y arranca la app sola.
+3. Abran la pestaña **Ports** (o el aviso «Open in browser») del puerto **8000**. La dirección es `https://…app.github.dev`,
+   privada a su cuenta de GitHub, y como es HTTPS el micrófono funciona.
+
+El codespace se apaga solo si no se usa (los datos se conservan mientras no lo borren). Las cuentas
+personales de GitHub traen horas gratis al mes. Para las fotos con IA, guarden `ANTHROPIC_API_KEY` en
+*Settings → Codespaces → Secrets*.
+
 ### Con Docker
 
 ```bash
