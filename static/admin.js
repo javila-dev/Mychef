@@ -678,6 +678,10 @@ async function renderHouse() {
         <div class="row spread"><span style="font-family:var(--serif);font-size:1.3rem">${esc(META.house_name)}</span>
           <button id="house-name">${icon("pencil", 18)} Cambiar nombre</button></div>
         <p class="muted small" style="margin:0">Es el nombre que aparece arriba en la pantalla de la tablet.</p>
+        <div class="row spread" style="border-top:1px dashed var(--line);padding-top:.75rem">
+          <span>Palabra de activación: <b>«${esc(META.wake_word)}»</b></span>
+          <button id="wake-word">${icon("mic", 18)} Cambiar</button></div>
+        <p class="muted small" style="margin:0">Se dice antes de un comando de voz, por ejemplo «${esc(META.wake_word)}, se acabó la leche». Se activa en cada tablet con el botón que está junto a la hora.</p>
       </section>
       <section class="card stack">
         <h2>Personas de la casa</h2>
@@ -729,6 +733,22 @@ async function renderHouse() {
           META.house_name = res.house_name;
           document.title = `${META.house_name} · Administrar`;
           $("#house-title").textContent = META.house_name;
+          renderHouse();
+        } },
+      ],
+    });
+  };
+  $("#wake-word").onclick = () => {
+    formModal({
+      title: "Palabra de activación", size: "narrow",
+      body: `<label class="field">¿Cómo le hablan a la casa?<input id="ww" value="${esc(META.wake_word)}" maxlength="40"></label>
+        <p class="muted small">Mejor dos palabras que no se digan por casualidad: «Oye casa», «Oye Lupita», «Hola nevera».</p>`,
+      actions: [
+        { label: "Cancelar", value: false },
+        { label: "Guardar", tone: "primary", icon: "check", onClick: async (dlg) => {
+          const res = await safe(() => api("/api/settings", { method: "PUT", json: { wake_word: $("#ww", dlg).value } }));
+          if (!res) return false;
+          META.wake_word = res.wake_word;
           renderHouse();
         } },
       ],

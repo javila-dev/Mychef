@@ -65,11 +65,13 @@ export function listenOnce({ onInterim } = {}) {
 }
 export function stopListening() { try { listenOnce.current?.stop(); } catch { /* ya paró */ } }
 
-// ---------------------------------------------------------------- manos libres (escucha continua)
+// ---------------------------------------------------------------- escucha continua
+// La usan el modo manos libres de las recetas y la palabra de activación («Oye casa»).
 
 export class HandsFree {
-  constructor(onPhrase) {
+  constructor(onPhrase, { onInterim = null } = {}) {
     this.onPhrase = onPhrase;
+    this.onInterim = onInterim;
     this.active = false;
     this.paused = false;
   }
@@ -83,20 +85,57 @@ export class HandsFree {
     const rec = new Recognition();
     rec.lang = LANG;
     rec.continuous = true;
-    rec.interimResults = false;
+    rec.interimResults = Boolean(this.onInterim);
     rec.onresult = (e) => {
-      const r = e.results[e.results.length - 1];
-      if (r.isFinal && !this.paused) this.onPhrase(r[0].transcript.trim());
+      if (this.paused) return;
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        const text = r[0].transcript.trim();
+        if (r.isFinal) this.onPhrase(text);
+        else this.onInterim?.(text);
+      }
     };
     rec.onerror = (e) => { if (e.error === "not-allowed" || e.error === "service-not-allowed") this.stop(); };
+    // Chrome corta la escucha continua cada cierto tiempo o tras un silencio: se reanuda sola.
     rec.onend = () => { if (this.active) setTimeout(() => this._run(), 300); };
     try { rec.start(); } catch { /* reintenta en onend */ }
     this.rec = rec;
   }
   stop() {
     this.active = false;
+    try { this.rec?.abort?.(); } catch { /* ya paró */ }
     try { this.rec?.stop(); } catch { /* ya paró */ }
   }
+}
+
+// ---------------------------------------------------------------- palabra de activación
+
+function plain(text) {
+  return text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[¿?¡!.,;:"']/g, " ").replace(/\s+/g, " ").trim();
+}
+
+// Variantes con las que el reconocedor suele escribir el saludo ("oye" → "hoy", "oie", "ok", "ey"…).
+const GREETINGS = "oye|oie|oi|oy|hoy|hola|ok|okey|okay|ey|hey|e";
+
+// ¿La frase empieza (o contiene) la palabra de activación? Devuelve lo que viene después.
+export function matchWake(text, wakeWord = "Oye casa") {
+  const t = plain(text);
+  const words = plain(wakeWord).split(" ").filter(Boolean);
+  if (!words.length) return { hit: false, rest: "" };
+  const name = words[words.length - 1].replace(/[^a-z0-9ñ]/g, "");
+  const esc = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // El nombre final (p. ej. "casa") es lo que importa; lo anterior admite variantes de saludo.
+  const lead = words.length > 1 ? `(?:${words.slice(0, -1).map(esc).join(" ")}|${GREETINGS})\\s+` : "";
+  const nameAlt = name === "casa" ? "(?:casa|kasa|caza)" : esc(name);
+  const re = new RegExp(`(?:^|\\s)${lead}${nameAlt}(?:\\s+|$)(.*)$`);
+  const m = t.match(re);
+  if (!m) return { hit: false, rest: "" };
+  // Recuperar el resto con tildes desde el texto original (mismas palabras al final).
+  const restWords = m[1].trim() ? m[1].trim().split(" ").length : 0;
+  const original = text.trim().replace(/[¿?¡!.,;:"']+$/g, "").split(/\s+/);
+  const rest = restWords ? original.slice(-restWords).join(" ").replace(/^[,.;:\s]+/, "") : "";
+  return { hit: true, rest };
 }
 
 // ---------------------------------------------------------------- temporizadores
@@ -196,3 +235,21 @@ setInterval(() => {
 render();
 
 export function stopRinging() { ringing?.(); }
+
+// Sonido corto de "te escucho" (como los parlantes inteligentes).
+let chimeCtx = null;
+export function chime() {
+  try {
+    chimeCtx = chimeCtx || new AudioContext();
+    const t0 = chimeCtx.currentTime;
+    [660, 990].forEach((f, i) => {
+      const o = chimeCtx.createOscillator(), g = chimeCtx.createGain();
+      o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t0 + i * 0.12);
+      g.gain.exponentialRampToValueAtTime(0.25, t0 + i * 0.12 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * 0.12 + 0.18);
+      o.connect(g).connect(chimeCtx.destination);
+      o.start(t0 + i * 0.12); o.stop(t0 + i * 0.12 + 0.2);
+    });
+  } catch { /* sin audio */ }
+}

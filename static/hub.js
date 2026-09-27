@@ -8,8 +8,8 @@ import {
   modal, mondayOf, safe, toPantryLine, toast, withBusy,
 } from "./common.js";
 import {
-  HandsFree, Timers, VOICE_SECURE, VOICE_SUPPORTED, listenOnce, speak, stopListening, stopRinging,
-  stopSpeaking,
+  HandsFree, Timers, VOICE_SECURE, VOICE_SUPPORTED, chime, listenOnce, matchWake, speak, stopListening,
+  stopRinging, stopSpeaking,
 } from "./voice.js";
 
 const app = $("#app");
@@ -178,7 +178,7 @@ async function renderHome() {
     <div class="home">
       <div class="left">
         <header class="time-block">
-          <div class="clock-row"><div class="clock" id="clock">${clock()}</div>${micButton("on-photo")}</div>
+          <div class="clock-row"><div class="clock" id="clock">${clock()}</div>${micButton("on-photo")}${wakeButton()}</div>
           <h1 class="hello">${greeting()}</h1>
           <div class="today-line">${date} · ${esc(META.house_name)}</div>
         </header>
@@ -645,6 +645,7 @@ let COOK = null;       // receta abierta: pasos, paso actual, porciones (para la
 let handsFree = null;
 
 function stopCookVoice() {
+  if (handsFree) wakeRelease("handsfree");
   handsFree?.stop();
   handsFree = null;
   COOK = null;
@@ -719,12 +720,18 @@ function toggleHandsFree() {
   if (handsFree?.active) {
     handsFree.stop();
     handsFree = null;
+    wakeRelease("handsfree");
     setHandsFreeUI(false);
     toast("Manos libres apagado");
     return;
   }
   // Si hablan mientras la casa habla, se calla y obedece. Lo que no es comando (incluida su propia voz) se ignora.
-  handsFree = new HandsFree((text) => { stopSpeaking(); handleVoiceText(text, { handsFree: true }); });
+  wakeHold("handsfree");
+  handsFree = new HandsFree((text) => {
+    stopSpeaking();
+    const w = matchWake(text, wakeWord()); // si anteponen «Oye casa», se ignora el saludo
+    handleVoiceText(w.hit ? (w.rest || text) : text, { handsFree: true });
+  });
   handsFree.start();
   setHandsFreeUI(true);
   showStep(COOK?.idx ?? 0, true);
@@ -774,57 +781,182 @@ async function say(text) {
   if (text) await speak(text);
 }
 
-function voiceModal() {
-  if (!voiceReady()) return;
-  stopRinging();
+// Ventana "Te escucho": la usan el botón Hablar y la palabra de activación.
+function listenUI(intro = "Hablen ahora. Por ejemplo: «se acabó la leche».") {
   const m = modal({
     title: "Te escucho…", size: "narrow",
     body: `<div class="listen"><div class="mic-wave">${icon("mic", 40)}</div>
-      <p class="heard" id="heard">Hablen ahora. Por ejemplo: «se acabó la leche».</p>
-      <p class="reply" id="reply" hidden></p></div>`,
+      <p class="heard">${esc(intro)}</p>
+      <p class="reply" hidden></p></div>`,
   });
-  const heard = $("#heard", m.el);
-  const reply = $("#reply", m.el);
-  const title = $(".m-title", m.el);
-  m.done.then(() => stopListening());
+  const ui = {
+    m,
+    closed: false,
+    heard: (t) => { $(".heard", m.el).textContent = t; },
+    title: (t) => { $(".m-title", m.el).textContent = t; },
+    idle: () => $(".mic-wave", m.el).classList.add("idle"),
+    reply: $(".reply", m.el),
+    close: () => m.close(),
+  };
+  m.done.then(() => { ui.closed = true; });
+  return ui;
+}
+
+// Lo que pasa después de entender una frase: ejecutar, mostrar la respuesta y ofrecer deshacer.
+async function processUtterance(text, ui) {
+  ui.idle();
+  ui.heard(`«${text}»`);
+  ui.title("Entendido");
+  const res = await handleVoiceText(text, { box: ui.reply });
+  if (!res) return ui.close();
+  if (res.undo && !ui.closed) {
+    const act = document.createElement("div");
+    act.className = "row";
+    act.style.cssText = "justify-content:center;margin-top:1rem";
+    act.innerHTML = `<button class="btn-plain" data-v-undo>${icon("undo", 20)} Deshacer</button><button class="primary" data-v-ok>${icon("check", 20)} Listo</button>`;
+    $(".listen", ui.m.el).appendChild(act);
+    $("[data-v-undo]", ui.m.el).onclick = async () => { await runUndo(); ui.close(); };
+    $("[data-v-ok]", ui.m.el).onclick = () => ui.close();
+    setTimeout(() => ui.close(), 9000);
+  } else {
+    setTimeout(() => ui.close(), res.navigate ? 600 : 2500);
+  }
+}
+
+function voiceModal() {
+  if (!voiceReady()) return;
+  stopRinging();
+  wakeHold("tap");
+  const ui = listenUI();
+  ui.m.done.then(() => { stopListening(); wakeRelease("tap"); });
   (async () => {
     let text = "";
     try {
-      text = await listenOnce({ onInterim: (t) => { heard.textContent = `«${t}»`; } });
+      text = await listenOnce({ onInterim: (t) => ui.heard(`«${t}»`) });
     } catch (e) {
-      title.textContent = "No pude escuchar";
-      heard.textContent = e.message === "not-allowed"
+      ui.title("No pude escuchar");
+      ui.heard(e.message === "not-allowed"
         ? "El micrófono está bloqueado. Denle permiso al navegador para usarlo."
-        : "No se oyó bien. Intenten de nuevo, más cerca de la tablet.";
-      $(".mic-wave", m.el).classList.add("idle");
+        : "No se oyó bien. Intenten de nuevo, más cerca de la tablet.");
+      ui.idle();
       return;
     }
-    $(".mic-wave", m.el).classList.add("idle");
     if (!text) {
-      title.textContent = "No escuché nada";
-      heard.textContent = "Toquen el micrófono y hablen apenas se abra esta ventana.";
-      setTimeout(() => m.close(), 3500);
+      ui.idle();
+      ui.title("No escuché nada");
+      ui.heard("Toquen el micrófono y hablen apenas se abra esta ventana.");
+      setTimeout(() => ui.close(), 3500);
       return;
     }
-    heard.textContent = `«${text}»`;
-    title.textContent = "Entendido";
-    const res = await handleVoiceText(text, { box: reply });
-    if (!res) return m.close();
-    const keepOpen = Boolean(res.undo);
-    if (keepOpen) {
-      const act = document.createElement("div");
-      act.className = "row";
-      act.style.cssText = "justify-content:center;margin-top:1rem";
-      act.innerHTML = `<button class="btn-plain" id="v-undo">${icon("undo", 20)} Deshacer</button><button class="primary" id="v-ok">${icon("check", 20)} Listo</button>`;
-      $(".listen", m.el).appendChild(act);
-      $("#v-undo", m.el).onclick = async () => { await runUndo(); m.close(); };
-      $("#v-ok", m.el).onclick = () => m.close();
-      setTimeout(() => m.close(), 9000);
-    } else {
-      setTimeout(() => m.close(), res.navigate ? 600 : 2500);
-    }
+    await processUtterance(text, ui);
   })();
 }
+
+// ---------------------------------------------------------------- palabra de activación («Oye casa»)
+// Escucha continua mientras la pantalla está abierta. Se pausa cuando otro modo usa el micrófono
+// (botón Hablar, manos libres) y vuelve sola. Se activa por dispositivo (queda recordado).
+
+const WAKE_KEY = "mychef-wake";
+const wake = { listener: null, ui: null, armTimer: null, holds: new Set(), busy: false };
+
+function wakeEnabled() {
+  try { return localStorage.getItem(WAKE_KEY) === "1"; } catch { return false; }
+}
+function wakeWord() { return META?.wake_word || "Oye casa"; }
+
+function wakeButton() {
+  if (!VOICE_SUPPORTED) return "";
+  const on = wakeEnabled();
+  return `<button class="wake-toggle ${on ? "on" : ""}" data-wake aria-pressed="${on}" title="${on ? "Toquen para apagar" : "Toquen para que la casa responda sin tocar la pantalla"}">
+    <span class="dot"></span>${on ? `Digan «${esc(wakeWord())}»` : `Activar «${esc(wakeWord())}»`}</button>`;
+}
+
+function refreshWakeButtons() {
+  $$("[data-wake]").forEach((b) => { b.outerHTML = wakeButton(); });
+}
+
+function startWake() {
+  if (!wakeEnabled() || wake.listener || wake.holds.size || !VOICE_SUPPORTED || !VOICE_SECURE) return;
+  wake.listener = new HandsFree(onWakeFinal, { onInterim: onWakeInterim });
+  wake.listener.start();
+}
+function stopWake() {
+  wake.listener?.stop();
+  wake.listener = null;
+}
+function wakeHold(reason) { wake.holds.add(reason); stopWake(); }
+function wakeRelease(reason) { wake.holds.delete(reason); setTimeout(startWake, 400); }
+
+function toggleWake() {
+  if (wakeEnabled()) {
+    try { localStorage.setItem(WAKE_KEY, "0"); } catch { /* sin almacenamiento */ }
+    stopWake();
+    toast(`«${wakeWord()}» apagado en este dispositivo`);
+  } else {
+    if (!voiceReady()) return;
+    try { localStorage.setItem(WAKE_KEY, "1"); } catch { /* sin almacenamiento */ }
+    startWake();
+    toast(`Listo: digan «${wakeWord()}» y lo que necesiten`, 4000);
+  }
+  refreshWakeButtons();
+}
+
+function wakeOpenUI() {
+  if (wake.ui && !wake.ui.closed) return wake.ui;
+  stopRinging();
+  wake.ui = listenUI("Te escucho…");
+  wake.ui.m.done.then(() => { clearTimeout(wake.armTimer); wake.ui = null; });
+  return wake.ui;
+}
+
+function onWakeInterim(text) {
+  if (wake.busy) return;
+  const m = matchWake(text, wakeWord());
+  if (!m.hit) return;
+  const ui = wakeOpenUI();
+  if (m.rest) ui.heard(`«${m.rest}»`);
+}
+
+async function onWakeFinal(text) {
+  if (wake.busy) return;
+  const m = matchWake(text, wakeWord());
+  const armed = wake.ui && wake.ui.armed;
+  let command = "";
+  if (m.hit) command = m.rest;
+  else if (armed) command = text;
+  else {
+    // Se abrió por algo que parecía la palabra, pero no lo era.
+    if (wake.ui && !wake.ui.armed) wake.ui.close();
+    return;
+  }
+  const ui = wakeOpenUI();
+  if (!command) {
+    // Solo dijeron «Oye casa»: sonar y esperar el comando unos segundos.
+    chime();
+    ui.armed = true;
+    ui.heard("Te escucho… digan lo que necesitan.");
+    clearTimeout(wake.armTimer);
+    wake.armTimer = setTimeout(() => {
+      ui.idle(); ui.title("No escuché nada"); ui.heard(`Cuando quieran, digan «${wakeWord()}».`);
+      setTimeout(() => ui.close(), 2500);
+    }, 8000);
+    return;
+  }
+  clearTimeout(wake.armTimer);
+  ui.armed = false;
+  wake.busy = true;               // mientras responde, no escucharse a sí misma
+  if (wake.listener) wake.listener.paused = true;
+  try {
+    await processUtterance(command, ui);
+  } finally {
+    setTimeout(() => { wake.busy = false; if (wake.listener) wake.listener.paused = false; }, 600);
+  }
+}
+
+document.addEventListener("click", (e) => { if (e.target.closest("[data-wake]")) toggleWake(); });
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") startWake(); else stopWake();
+});
 
 async function runUndo() {
   if (!lastUndo) return say("No hay nada para deshacer.");
@@ -891,5 +1023,6 @@ async function start() {
   await loadPhotos();
   await home();
   resetIdle();
+  startWake();
 }
 start();

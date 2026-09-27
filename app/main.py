@@ -172,6 +172,7 @@ class IngredientUpdate(BaseModel):
 class SettingsIn(BaseModel):
     household_size: int | None = Field(None, ge=1, le=50)
     house_name: str | None = Field(None, max_length=60)
+    wake_word: str | None = Field(None, max_length=40)
 
 
 def _validate_meals(meals: list[str]) -> list[str]:
@@ -230,6 +231,7 @@ def meta(session: Session = SessionDep):
         "units": list(UNITS),
         "household_size": services.household_size(session),
         "house_name": _house_name(session),
+        "wake_word": _wake_word(session),
         "vision_model": vision.MODEL,
         "chore_emojis": CHORE_EMOJIS,
     }
@@ -251,8 +253,22 @@ def update_settings(data: SettingsIn, session: Session = SessionDep):
         session.merge(Setting(key="household_size", value=str(data.household_size)))
     if data.house_name is not None:
         session.merge(Setting(key="house_name", value=data.house_name.strip()))
+    if data.wake_word is not None:
+        word = " ".join(data.wake_word.split())
+        if len(word) < 3:
+            raise HTTPException(422, "La palabra de activación es muy corta. Usen dos palabras, como «Oye casa».")
+        session.merge(Setting(key="wake_word", value=word))
     session.commit()
-    return {"household_size": services.household_size(session), "house_name": _house_name(session)}
+    return {
+        "household_size": services.household_size(session),
+        "house_name": _house_name(session),
+        "wake_word": _wake_word(session),
+    }
+
+
+def _wake_word(session: Session) -> str:
+    s = session.get(Setting, "wake_word")
+    return s.value if s and s.value else "Oye casa"
 
 
 def _house_name(session: Session) -> str:

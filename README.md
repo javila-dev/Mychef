@@ -100,6 +100,22 @@ tablet lee cada paso en voz alta; si le hablan encima, se calla y obedece.
 
 Los temporizadores aparecen arriba en todas las pantallas y, al terminar, suenan y lo dicen en voz alta.
 
+**Palabra de activación («Oye casa»)**: en el inicio, junto a la hora, toquen **Digan «Oye casa»** para
+dejar la tablet escuchando sin tocarla (el punto verde parpadea mientras está activa). Luego:
+- de una vez: «Oye casa, se acabó la leche», o
+- en dos partes: «Oye casa» → suena un tono → «¿qué hay de almuerzo?» (espera unos 8 segundos).
+
+Se activa **en cada tablet por separado** y la tablet lo recuerda aunque se recargue. La palabra se
+cambia en **Ajustes → Casa y tareas → Palabra de activación** (mejor dos palabras, como «Oye Lupita»).
+Mientras cocinan en **Manos libres** no hace falta decirla.
+
+Tengan en cuenta:
+- Con la palabra activada, Chrome escucha todo el tiempo y envía el audio a Google para reconocerlo
+  (la app solo reacciona a lo que empieza con la palabra). Si no les gusta, déjenla apagada y usen **Hablar**.
+- Gasta algo más de batería: la tablet de la nevera conviene tenerla conectada. En algunos Android
+  Chrome hace un pitido cada vez que reinicia el micrófono; se puede silenciar bajando el volumen de notificaciones.
+- Cuando la pantalla se oculta o se apaga, deja de escuchar; vuelve sola al regresar.
+
 Requisitos del navegador para la voz:
 - **Chrome** (o Fully Kiosk Browser) en la tablet, **con internet**: el reconocimiento de voz de
   Chrome usa los servidores de Google. Las respuestas habladas funcionan sin internet.

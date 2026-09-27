@@ -67,8 +67,9 @@ body.at-home main { position: relative; z-index: 1; }
   border-radius: var(--r-dialog); padding: 1.1rem 1.25rem 1.2rem;
   box-shadow: 0 12px 32px -18px rgba(0, 0, 0, .55);
 }
-body.at-home #toast { top: 1.4rem; bottom: auto; transform: translate(-50%, -8px); }
-body.at-home #toast.show { transform: translate(-50%, 0); }
+/* En el inicio el aviso sale arriba a la derecha, sobre los widgets: no tapa la hora ni el botón de «Oye casa». */
+body.at-home #toast { top: 1.4rem; bottom: auto; left: auto; right: 1.6rem; transform: translateY(-8px); max-width: min(34rem, calc(100vw - 2rem)); }
+body.at-home #toast.show { transform: translateY(0); }
 .w-head { display: flex; align-items: center; justify-content: space-between; gap: .8rem; margin-bottom: .55rem; }
 .w-head h2 { margin: 0; font-size: 1.15rem; font-weight: 600; }
 .w-head small { color: var(--muted); font-size: .9rem; }
@@ -397,4 +398,19 @@ body.at-home #toast { top: 4.4rem; }
 }
 @media (prefers-reduced-motion: reduce) {
   .mic-wave::after, .done-msg .mark.ring { animation: none; }
+}
+
+/* Palabra de activación */
+.wake-toggle {
+  display: inline-flex; align-items: center; gap: .55rem; padding: .6rem 1rem !important; font-weight: 500;
+  background: rgba(0, 0, 0, .38) !important; color: #fff !important; border: 0 !important;
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); text-shadow: none;
+}
+.wake-toggle .dot { width: 10px; height: 10px; border-radius: 50%; background: rgba(255, 255, 255, .55); }
+.wake-toggle.on .dot { background: #5ee39a; box-shadow: 0 0 0 0 rgba(94, 227, 154, .6); animation: wake-pulse 2s ease-out infinite; }
+@keyframes wake-pulse { 70% { box-shadow: 0 0 0 8px rgba(94, 227, 154, 0); } 100% { box-shadow: 0 0 0 0 rgba(94, 227, 154, 0); } }
+@media (prefers-reduced-motion: reduce) { .wake-toggle.on .dot { animation: none; } }
+@media (max-width: 760px) {
+  .wake-toggle { font-size: .9rem; padding: .5rem .8rem !important; }
+  body.at-home #toast { top: auto; bottom: 1.4rem; right: 1rem; left: 1rem; max-width: none; text-align: center; }
 }
