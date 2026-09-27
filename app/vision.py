@@ -58,6 +58,24 @@ class RecipeDraft(BaseModel):
     notes: str
 
 
+class ReceiptLine(BaseModel):
+    raw_text: str
+    name: str
+    quantity: float
+    unit: str
+    category: str
+    price: float | None
+    kind: Literal["alimento", "hogar", "otro"]
+
+
+class Receipt(BaseModel):
+    store: str
+    date: str | None
+    total: float | None
+    items: list[ReceiptLine]
+    notes: str
+
+
 UNITS_HINT = "g, kg, ml, l, taza, cda, cdta, unidad, lb, oz, o una unidad propia como 'diente', 'pizca', 'atado'"
 
 
@@ -161,3 +179,39 @@ Reglas:
         raise VisionError("Envía el texto o una foto de la receta.", 400)
     content.append({"type": "text", "text": prompt})
     return _parse(content, RecipeDraft)
+
+
+def scan_receipt(images: list[tuple[bytes, str]], known_ingredients: list[str]) -> Receipt:
+    """Lee una factura de supermercado (una o varias fotos de la misma factura)."""
+    if not images:
+        raise VisionError("Toma al menos una foto de la factura.", 400)
+    if len(images) > 6:
+        raise VisionError("Máximo 6 fotos por factura.", 400)
+    known = ", ".join(sorted(known_ingredients)) or "(todavía no hay productos registrados)"
+    prompt = f"""{"Estas fotos son partes de UNA MISMA factura" if len(images) > 1 else "Esta foto es una factura"} \
+de compras de una familia (supermercado, tienda, plaza de mercado o domicilio).
+
+Extrae cada producto comprado para llevarlo al inventario de la casa.
+
+Productos que la familia ya tiene registrados: {known}.
+Las facturas usan nombres abreviados ("LCHE ALQ 1100ML", "PAP HIG FAM X12"). Tradúcelos a un nombre \
+corto y claro en español, en singular. Si corresponde a uno de los productos registrados, usa \
+EXACTAMENTE ese nombre para que coincida con sus recetas (p. ej. "ARROZ DIANA 1000G" -> "Arroz").
+
+Reglas:
+- raw_text: la línea tal como aparece en la factura.
+- quantity y unit: la cantidad REAL de producto, no el número de paquetes. Multiplica paquetes \
+por contenido: 2 x "LECHE 1100ML" -> quantity 2200, unit "ml"; "HUEVO AA X30" -> 30 unidad; \
+"PAPA 1.250 KG" -> 1250 g. Unidades: {UNITS_HINT}. Si no se sabe el contenido, usa la cantidad \
+de paquetes con unit "unidad".
+- category: una de {", ".join(INGREDIENT_CATEGORIES)}.
+- price: valor total pagado por esa línea (número, sin símbolos ni separador de miles), o null.
+- kind: "alimento" para comida y bebidas, "hogar" para aseo, limpieza, cuidado personal y \
+cosas de la casa, "otro" para lo demás (bolsas, propinas, domicilio, descuentos).
+- Agrupa líneas repetidas del mismo producto. No incluyas subtotales, impuestos, ni medios de pago.
+- store: nombre del almacén. date: fecha de la compra en formato AAAA-MM-DD, o null.
+- total: total pagado, o null.
+- notes: una frase corta si algo no se pudo leer bien (o vacío)."""
+    content = [_image_block(data, mt) for data, mt in images]
+    content.append({"type": "text", "text": prompt})
+    return _parse(content, Receipt)

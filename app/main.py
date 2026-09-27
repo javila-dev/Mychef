@@ -4,19 +4,25 @@ import datetime as dt
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from . import services, vision
+from . import household, services, vision
+from .auth import AuthMiddleware, check_pin, pin_enabled
 from .db import get_session, init_db
 from .models import (
     DISH_TYPES,
+    CHORE_EMOJIS,
     INGREDIENT_CATEGORIES,
     MEAL_TYPES,
+    Chore,
+    ChoreLog,
     Ingredient,
+    Member,
+    ShoppingExtra,
     MenuEntry,
     PantryItem,
     Recipe,
@@ -35,6 +41,8 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="MyChef", description="El menú de la casa con nuestras recetas", lifespan=lifespan)
+
+app.add_middleware(AuthMiddleware)
 
 SessionDep = Depends(get_session)
 
@@ -68,6 +76,7 @@ class PantryIn(BaseModel):
     unit: str = "g"
     category: str | None = None
     expires_on: dt.date | None = None
+    min_quantity: float | None = Field(None, ge=0)
     replace: bool = False
 
 
@@ -75,6 +84,51 @@ class PantryUpdate(BaseModel):
     quantity: float | None = Field(None, ge=0)
     unit: str | None = None
     expires_on: dt.date | None = None
+    min_quantity: float | None = Field(None, ge=0)
+
+
+class MemberIn(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    emoji: str = Field("🙂", max_length=8)
+
+
+class ChoreIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    emoji: str = Field("🧹", max_length=8)
+    every_days: int = Field(7, ge=1, le=365)
+    member_id: int | None = None
+    rotate: bool = False
+
+
+class ChoreDone(BaseModel):
+    member_id: int | None = None
+
+
+class ReceiptLineIn(BaseModel):
+    raw_text: str = ""
+    name: str = Field(min_length=1)
+    quantity: float = Field(ge=0)
+    unit: str = "unidad"
+    category: str | None = None
+    price: float | None = None
+    expires_on: dt.date | None = None
+
+
+class ReceiptIn(BaseModel):
+    store: str = ""
+    day: dt.date | None = None
+    total: float | None = None
+    items: list[ReceiptLineIn]
+
+
+class ExtraIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    quantity: float | None = Field(None, ge=0)
+    unit: str | None = None
+
+
+class PinIn(BaseModel):
+    pin: str
 
 
 class MenuIn(BaseModel):
@@ -138,6 +192,8 @@ def _pantry_out(item: PantryItem, today: dt.date | None = None) -> dict:
         "quantity": item.quantity,
         "unit": item.unit,
         "expires_on": item.expires_on.isoformat() if item.expires_on else None,
+        "min_quantity": item.min_quantity,
+        "low": item.min_quantity is not None and item.quantity < item.min_quantity,
         "days_left": days_left,
         "expiring": days_left is not None and days_left <= services.EXPIRING_DAYS,
     }
@@ -165,7 +221,18 @@ def meta(session: Session = SessionDep):
         "units": list(UNITS),
         "household_size": services.household_size(session),
         "vision_model": vision.MODEL,
+        "chore_emojis": CHORE_EMOJIS,
     }
+
+
+@app.get("/api/auth")
+def auth_status():
+    return {"pin_required": pin_enabled()}
+
+
+@app.post("/api/login")
+def login(data: PinIn, request: Request):
+    return check_pin(data.pin, request)
 
 
 @app.put("/api/settings")
@@ -294,7 +361,11 @@ def add_pantry(data: PantryIn, session: Session = SessionDep):
 
 @app.post("/api/pantry/bulk", status_code=201)
 def add_pantry_bulk(items: list[PantryIn], session: Session = SessionDep):
-    added = [services.add_to_pantry(session, **d.model_dump()) for d in items]
+    added = []
+    for d in items:
+        item = services.add_to_pantry(session, **d.model_dump())
+        household._clear_extras_for(session, item.ingredient.name)
+        added.append(item)
     session.commit()
     return [_pantry_out(i) for i in added]
 
@@ -450,7 +521,217 @@ def cook_menu(entry_id: int, session: Session = SessionDep):
 
 @app.get("/api/shopping-list")
 def get_shopping_list(start: dt.date, days: int = 7, session: Session = SessionDep):
-    return services.shopping_list(session, start, start + dt.timedelta(days=days - 1))
+    """Menú de la semana + lo que se está acabando + lo anotado a mano."""
+    return household.full_shopping_list(session, start, start + dt.timedelta(days=days - 1))
+
+
+@app.post("/api/shopping/extra", status_code=201)
+def add_extra(data: ExtraIn, session: Session = SessionDep):
+    key = services.ingredient_key(data.name)
+    for e in session.exec(select(ShoppingExtra)):
+        if services.ingredient_key(e.name) == key:
+            return e
+    name = data.name.strip()
+    extra = ShoppingExtra(name=name[0].upper() + name[1:], quantity=data.quantity, unit=data.unit)
+    session.add(extra)
+    session.commit()
+    session.refresh(extra)
+    return extra
+
+
+@app.delete("/api/shopping/extra/{extra_id}", status_code=204)
+def delete_extra(extra_id: int, session: Session = SessionDep):
+    extra = session.get(ShoppingExtra, extra_id)
+    if extra:
+        session.delete(extra)
+        session.commit()
+
+
+@app.post("/api/shopping/ran-out", status_code=201)
+def ran_out(data: ExtraIn, session: Session = SessionDep):
+    """"Se acabó X": lo deja en cero en el inventario y lo anota en la lista."""
+    key = services.ingredient_key(data.name)
+    ing = session.exec(select(Ingredient).where(Ingredient.key == key)).first()
+    if ing:
+        item = session.exec(select(PantryItem).where(PantryItem.ingredient_id == ing.id)).first()
+        if item:
+            item.quantity = 0
+            item.updated_at = utcnow()
+    session.commit()
+    return add_extra(ExtraIn(name=ing.name if ing else data.name), session)
+
+
+# ---------------------------------------------------------------- facturas
+
+@app.post("/api/receipts/scan")
+async def scan_receipt(photos: list[UploadFile] = File(...), session: Session = SessionDep):
+    """Lee la factura con IA. No guarda nada: la familia revisa y confirma."""
+    known = [i.name for i in session.exec(select(Ingredient))]
+    images = [(await p.read(), p.content_type or "") for p in photos]
+    try:
+        receipt = vision.scan_receipt(images, known)
+    except vision.VisionError as e:
+        raise HTTPException(e.status, str(e)) from e
+    keys = {services.ingredient_key(n) for n in known}
+    day = None
+    if receipt.date:
+        try:
+            day = dt.date.fromisoformat(receipt.date).isoformat()
+        except ValueError:
+            day = None
+    categories = set(INGREDIENT_CATEGORIES)
+    return {
+        "store": receipt.store,
+        "day": day,
+        "total": receipt.total,
+        "notes": receipt.notes,
+        "items": [
+            {
+                **line.model_dump(),
+                "category": line.category if line.category in categories else "otros",
+                "known": services.ingredient_key(line.name) in keys,
+                # por defecto se guarda comida y cosas de la casa; no bolsas ni domicilios
+                "keep": line.kind != "otro",
+            }
+            for line in receipt.items
+        ],
+    }
+
+
+@app.post("/api/receipts", status_code=201)
+def save_receipt(data: ReceiptIn, session: Session = SessionDep):
+    purchase, added = household.save_purchase(session, data.store, data.day, data.total, data.items)
+    session.commit()
+    return {"purchase_id": purchase.id, "added": len(added)}
+
+
+@app.get("/api/purchases")
+def purchases(session: Session = SessionDep):
+    return household.spending(session)
+
+
+# ---------------------------------------------------------------- hoy y tareas
+
+@app.get("/api/today")
+def today(session: Session = SessionDep):
+    return household.today_summary(session)
+
+
+@app.get("/api/members")
+def list_members(session: Session = SessionDep):
+    return list(household.members_by_id(session).values())
+
+
+@app.post("/api/members", status_code=201)
+def add_member(data: MemberIn, session: Session = SessionDep):
+    member = Member(**data.model_dump())
+    session.add(member)
+    session.commit()
+    session.refresh(member)
+    return member
+
+
+@app.put("/api/members/{member_id}")
+def update_member(member_id: int, data: MemberIn, session: Session = SessionDep):
+    member = session.get(Member, member_id)
+    if not member:
+        raise HTTPException(404, "Persona no encontrada")
+    member.name, member.emoji = data.name, data.emoji
+    session.commit()
+    session.refresh(member)
+    return member
+
+
+@app.delete("/api/members/{member_id}", status_code=204)
+def delete_member(member_id: int, session: Session = SessionDep):
+    member = session.get(Member, member_id)
+    if not member:
+        return
+    for c in session.exec(select(Chore)):
+        if c.member_id == member_id:
+            c.member_id = None
+        if c.last_done_by == member_id:
+            c.last_done_by = None
+    session.delete(member)
+    session.commit()
+
+
+def _get_chore(session: Session, chore_id: int) -> Chore:
+    chore = session.get(Chore, chore_id)
+    if not chore:
+        raise HTTPException(404, "Tarea no encontrada")
+    return chore
+
+
+def _check_member(session: Session, member_id: int | None) -> None:
+    if member_id is not None and not session.get(Member, member_id):
+        raise HTTPException(422, "Esa persona no existe")
+
+
+@app.get("/api/chores")
+def list_chores(session: Session = SessionDep):
+    return household.list_chores(session)
+
+
+@app.get("/api/chores/stats")
+def chores_stats(days: int = 30, session: Session = SessionDep):
+    return household.chore_stats(session, days)
+
+
+@app.post("/api/chores", status_code=201)
+def add_chore(data: ChoreIn, session: Session = SessionDep):
+    _check_member(session, data.member_id)
+    chore = Chore(**data.model_dump())
+    session.add(chore)
+    session.commit()
+    session.refresh(chore)
+    return chore
+
+
+@app.put("/api/chores/{chore_id}")
+def update_chore(chore_id: int, data: ChoreIn, session: Session = SessionDep):
+    chore = _get_chore(session, chore_id)
+    _check_member(session, data.member_id)
+    for k, v in data.model_dump().items():
+        setattr(chore, k, v)
+    session.commit()
+    session.refresh(chore)
+    return chore
+
+
+@app.delete("/api/chores/{chore_id}", status_code=204)
+def delete_chore(chore_id: int, session: Session = SessionDep):
+    chore = session.get(Chore, chore_id)
+    if chore:
+        for log in session.exec(select(ChoreLog).where(ChoreLog.chore_id == chore_id)):
+            session.delete(log)
+        session.delete(chore)
+        session.commit()
+
+
+@app.post("/api/chores/{chore_id}/done")
+def chore_done(chore_id: int, data: ChoreDone, session: Session = SessionDep):
+    chore = _get_chore(session, chore_id)
+    _check_member(session, data.member_id)
+    household.complete_chore(session, chore, data.member_id)
+    session.commit()
+    return household.list_chores(session)
+
+
+@app.post("/api/chores/{chore_id}/undo")
+def chore_undo(chore_id: int, session: Session = SessionDep):
+    """Deshacer un toque por error: borra el último registro y vuelve al anterior."""
+    chore = _get_chore(session, chore_id)
+    logs = session.exec(
+        select(ChoreLog).where(ChoreLog.chore_id == chore_id).order_by(ChoreLog.id.desc())
+    ).all()
+    if logs:
+        session.delete(logs[0])
+        prev = logs[1] if len(logs) > 1 else None
+        chore.last_done = prev.day if prev else None
+        chore.last_done_by = prev.member_id if prev else None
+        session.commit()
+    return household.list_chores(session)
 
 
 # ---------------------------------------------------------------- interfaz
@@ -461,3 +742,13 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 @app.get("/", include_in_schema=False)
 def index():
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/admin", include_in_schema=False)
+def admin():
+    return FileResponse(STATIC_DIR / "admin.html")
+
+
+@app.get("/manifest.webmanifest", include_in_schema=False)
+def manifest():
+    return FileResponse(STATIC_DIR / "manifest.webmanifest", media_type="application/manifest+json")

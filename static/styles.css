@@ -144,3 +144,17 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
   .ing-row .ing-name { grid-column: 1 / -1; }
   main { padding: .75rem; }
 }
+a.btn { text-decoration: none; display: inline-block; }
+
+/* PIN de la casa */
+.pin-screen {
+  position: fixed; inset: 0; z-index: 100; background: var(--bg);
+  display: grid; place-items: center; padding: 1rem;
+}
+.pin-card { text-align: center; width: min(360px, 100%); }
+.pin-emoji { font-size: 3.5rem; }
+.pin-dots { font-size: 2rem; letter-spacing: .4rem; min-height: 2.8rem; }
+.pin-error { color: var(--bad); min-height: 1.4rem; }
+.pin-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: .7rem; margin-top: .5rem; }
+.pin-pad button { font-size: 1.8rem; padding: 1rem 0; border-radius: 16px; }
+.pin-pad button.ok { background: var(--ok); border-color: var(--ok); color: #fff; }

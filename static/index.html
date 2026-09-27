@@ -2,32 +2,20 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MyChef · El menú de la casa</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍲</text></svg>">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#c2562b">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Nuestra casa</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/icon.svg">
   <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/hub.css">
 </head>
-<body>
-  <header class="topbar">
-    <h1>🍲 MyChef</h1>
-    <label class="household">Personas en casa
-      <input id="household" type="number" min="1" max="50" value="4">
-    </label>
-  </header>
-
-  <nav class="tabs" role="tablist">
-    <button data-view="menu" class="active">Menú</button>
-    <button data-view="cook">¿Qué cocino?</button>
-    <button data-view="recipes">Recetas</button>
-    <button data-view="pantry">Despensa</button>
-    <button data-view="shopping">Compras</button>
-  </nav>
-
-  <main id="view"></main>
-
-  <dialog id="modal"><div id="modal-body"></div></dialog>
+<body class="hub">
+  <main id="app"></main>
   <div id="toast" role="status"></div>
-
-  <script src="/static/app.js" type="module"></script>
+  <script src="/static/hub.js" type="module"></script>
 </body>
 </html>

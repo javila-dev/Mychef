@@ -1,67 +1,16 @@
-// MyChef — interfaz sin dependencias. Todo el estado vive en el servidor (SQLite).
+// MyChef · Administrar — la vista completa y detallada. Todo el estado vive en el servidor (SQLite).
 
-const $ = (sel, root = document) => root.querySelector(sel);
-const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+import {
+  $, $$, REASON_TEXT, addDays, api, cap, esc, fmtDay, fmtMoney, fmtQty, isoDate, mondayOf, safe,
+  compressImage, fmtUnit, toPantryLine, toast,
+} from "./common.js";
+
 const view = $("#view");
 const modal = $("#modal");
 const modalBody = $("#modal-body");
 
 let META = null;
 let weekStart = mondayOf(new Date());
-
-// ------------------------------------------------------------------ utilidades
-
-function esc(s) {
-  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
-
-async function api(path, opts = {}) {
-  const init = { ...opts };
-  if (opts.json !== undefined) {
-    init.body = JSON.stringify(opts.json);
-    init.headers = { "Content-Type": "application/json" };
-  }
-  const res = await fetch(path, init);
-  if (res.status === 204) return null;
-  const data = await res.json().catch(() => null);
-  if (!res.ok) {
-    let msg = data?.detail ?? `Error ${res.status}`;
-    if (Array.isArray(msg)) msg = msg.map((d) => d.msg).join("; ");
-    throw new Error(msg);
-  }
-  return data;
-}
-
-function toast(msg) {
-  const t = $("#toast");
-  t.textContent = msg;
-  t.classList.add("show");
-  clearTimeout(toast._t);
-  toast._t = setTimeout(() => t.classList.remove("show"), 2800);
-}
-
-async function safe(fn) {
-  try { return await fn(); } catch (e) { toast(e.message); }
-}
-
-function isoDate(d) {
-  const z = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-  return z.toISOString().slice(0, 10);
-}
-function mondayOf(d) {
-  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const wd = (x.getDay() + 6) % 7;
-  x.setDate(x.getDate() - wd);
-  return x;
-}
-function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
-function fmtDay(d) { return d.toLocaleDateString("es", { weekday: "long", day: "numeric", month: "short" }); }
-function fmtQty(q) {
-  const n = Number(q);
-  const digits = Math.abs(n) >= 100 ? 0 : Math.abs(n) >= 10 ? 1 : 2;
-  return n.toLocaleString("es", { maximumFractionDigits: digits });
-}
-function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
 function coverageBar(c) {
   const pct = Math.round(c * 100);
@@ -82,7 +31,7 @@ modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); }
 
 // ------------------------------------------------------------------ navegación
 
-const VIEWS = { menu: renderMenu, cook: renderCook, recipes: renderRecipes, pantry: renderPantry, shopping: renderShopping };
+const VIEWS = { menu: renderMenu, cook: renderCook, recipes: renderRecipes, pantry: renderPantry, shopping: renderShopping, house: renderHouse };
 let current = "menu";
 
 function go(name) {
@@ -245,7 +194,7 @@ async function renderCook(filters = {}) {
           ${s.recipe.favorite ? `<span class="badge accent">★ favorita</span>` : ""}
           ${s.uses_expiring.length ? `<span class="badge warn">aprovecha: ${esc(s.uses_expiring.join(", "))}</span>` : ""}</div>
         ${coverageBar(s.coverage)}
-        ${s.missing.length ? `<div class="small">Falta: ${s.missing.map((m) => `${esc(m.name)} (${fmtQty(m.quantity)} ${esc(m.unit)})`).join(", ")}</div>` : ""}
+        ${s.missing.length ? `<div class="small">Falta: ${s.missing.map((m) => `${esc(m.name)} (${fmtQty(m.quantity)} ${esc(fmtUnit(m.quantity, m.unit))})`).join(", ")}</div>` : ""}
         <div class="small muted">${s.last_cooked ? `Última vez: ${new Date(s.last_cooked + "T12:00").toLocaleDateString("es")}` : "Aún no la han registrado"}</div>
         <div><button data-open="${s.recipe.id}">Ver receta para ${s.servings}</button></div>
       </article>`).join("")}</div>`
@@ -448,11 +397,12 @@ function importDialog() {
       <div class="row"><button class="primary" type="submit">Leer receta</button><span id="imp-st" class="muted"></span></div>
     </form>`);
   $("#x").onclick = closeModal;
-  $("#imp").onsubmit = (e) => {
+  $("#imp").onsubmit = async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
     if (!fd.get("text")) fd.delete("text");
     if (!fd.get("photo")?.size) fd.delete("photo");
+    else fd.set("photo", await compressImage(fd.get("photo")));
     if (!fd.has("text") && !fd.has("photo")) return toast("Agrega una foto o el texto");
     const btn = $("button[type=submit]", e.target);
     btn.disabled = true;
@@ -492,14 +442,15 @@ async function renderPantry() {
         <a href="#" id="use-exp">ver qué cocinar</a></div>` : ""}
     </div>
     ${items.length ? `<div class="card table-wrap"><table>
-      <thead><tr><th>Ingrediente</th><th style="width:7rem">Cantidad</th><th style="width:6rem">Unidad</th><th style="width:9.5rem">Vence</th><th></th></tr></thead>
+      <thead><tr><th>Ingrediente</th><th style="width:7rem">Cantidad</th><th style="width:6rem">Unidad</th><th style="width:9.5rem">Vence</th><th style="width:6rem" title="Si baja de aquí, pasa sola a la lista de compras">Mínimo</th><th></th></tr></thead>
       <tbody>${items.map((i, idx) => `
-        ${idx === 0 || items[idx - 1].category !== i.category ? `<tr><th colspan="5">${esc(cap(i.category))}</th></tr>` : ""}
+        ${idx === 0 || items[idx - 1].category !== i.category ? `<tr><th colspan="6">${esc(cap(i.category))}</th></tr>` : ""}
         <tr class="${i.expiring ? "expiring" : ""}" data-id="${i.id}">
-          <td>${esc(i.name)} ${i.quantity <= 0 ? `<span class="badge bad">agotado</span>` : ""}</td>
+          <td>${esc(i.name)} ${i.quantity <= 0 ? `<span class="badge bad">agotado</span>` : i.low ? `<span class="badge warn">poco</span>` : ""}</td>
           <td><input type="number" step="any" min="0" value="${i.quantity}" data-f="quantity"></td>
           <td><input list="dl-units" value="${esc(i.unit)}" data-f="unit"></td>
           <td><input type="date" value="${i.expires_on ?? ""}" data-f="expires_on"></td>
+          <td><input type="number" step="any" min="0" value="${i.min_quantity ?? ""}" placeholder="—" data-f="min_quantity"></td>
           <td class="row" style="flex-wrap:nowrap"><button class="ghost" data-eq="${idx}" title="Equivalencias (cuánto pesa una taza o una unidad)">⚖</button>
             <button class="ghost danger" data-del="${i.id}" title="Quitar">✕</button></td>
         </tr>`).join("")}</tbody></table></div>`
@@ -525,6 +476,7 @@ async function renderPantry() {
     let v = inp.value;
     if (f === "quantity") v = parseFloat(v) || 0;
     if (f === "expires_on") v = v || null;
+    if (f === "min_quantity") v = v === "" ? null : parseFloat(v);
     await api(`/api/pantry/${id}`, { method: "PATCH", json: { [f]: v } });
     toast("Actualizado");
   }));
@@ -583,7 +535,9 @@ function scanDialog() {
     $("#sf-st").textContent = "Mirando la foto…";
     safe(async () => {
       try {
-        const res = await api("/api/pantry/scan", { method: "POST", body: new FormData(e.target) });
+        const fd = new FormData();
+        fd.append("photo", await compressImage(e.target.photo.files[0]));
+        const res = await api("/api/pantry/scan", { method: "POST", body: fd });
         showScanResult(res);
       } finally {
         btn.disabled = false;
@@ -650,14 +604,15 @@ async function renderShopping() {
         <button class="primary" id="bought" ${list.length ? "" : "disabled"}>Ya lo compré → a la despensa</button>
       </div>
     </div>
-    ${list.length ? `<div class="card"><p class="small muted" style="margin-top:0">Solo lo que falta según el menú
-      (lo ya cocinado no cuenta) descontando lo que hay en la despensa.</p>
+    ${list.length ? `<div class="card"><p class="small muted" style="margin-top:0">Lo que falta para el menú
+      (descontando la despensa), lo que bajó de su mínimo y lo anotado a mano.</p>
       <ul class="clean">${list.map((i, idx) => `
-        ${idx === 0 || list[idx - 1].category !== i.category ? `<li><strong class="muted small">${esc(cap(i.category))}</strong></li>` : ""}
+        ${idx === 0 || list[idx - 1].category !== i.category ? `<li><strong class="muted small">${esc(i.category === "anotado" ? "Anotado a mano" : cap(i.category))}</strong></li>` : ""}
         <li><label class="row">
           <input type="checkbox" data-idx="${idx}">
-          <strong>${fmtQty(i.quantity)} ${esc(i.unit)}</strong> ${esc(i.name)}
-          <span class="muted small">— ${esc(i.recipes.join(", "))}</span>
+          ${i.quantity != null ? `<strong>${fmtQty(i.quantity)} ${esc(fmtUnit(i.quantity, i.unit))}</strong>` : ""} ${esc(i.name)}
+          <span class="muted small">— ${esc(i.recipes.length ? i.recipes.join(", ") : REASON_TEXT[i.reason])}</span>
+          ${i.extra_id ? `<button class="ghost danger" data-rm="${i.extra_id}" title="Quitar">✕</button>` : ""}
         </label></li>`).join("")}</ul></div>`
       : `<div class="empty card">No falta nada para el menú de esta semana 🎉<br>
           <span class="small">(Si el menú está vacío, planéenlo primero en la pestaña Menú.)</span></div>`}`;
@@ -665,17 +620,118 @@ async function renderShopping() {
   $("#prev").onclick = () => { weekStart = addDays(weekStart, -7); refresh(); };
   $("#next").onclick = () => { weekStart = addDays(weekStart, 7); refresh(); };
   $("#copy").onclick = () => {
-    const text = list.map((i) => `☐ ${fmtQty(i.quantity)} ${i.unit} ${i.name}`).join("\n");
+    const text = list.map((i) => `☐ ${i.quantity != null ? `${fmtQty(i.quantity)} ${i.unit} ` : ""}${i.name}`).join("\n");
     navigator.clipboard?.writeText(text).then(() => toast("Lista copiada"), () => toast("No se pudo copiar"));
   };
+  $$("[data-rm]", view).forEach((b) => b.onclick = (e) => safe(async () => {
+    e.preventDefault();
+    await api(`/api/shopping/extra/${b.dataset.rm}`, { method: "DELETE" });
+    refresh();
+  }));
   $("#bought").onclick = () => safe(async () => {
     const checked = $$("input[data-idx]:checked", view).map((c) => list[+c.dataset.idx]);
     const items = checked.length ? checked : list;
     if (!checked.length && !confirm("No marcaste nada. ¿Agregar toda la lista a la despensa?")) return;
-    await api("/api/pantry/bulk", { method: "POST", json: items.map((i) => ({ name: i.name, quantity: i.quantity, unit: i.unit, category: i.category })) });
+    await api("/api/pantry/bulk", { method: "POST", json: items.map(toPantryLine) });
     toast(`${items.length} ingredientes agregados a la despensa`);
     refresh();
   });
+}
+
+// ------------------------------------------------------------------ casa: personas, tareas, gastos
+
+async function renderHouse() {
+  const [members, chores, stats, spend] = await Promise.all([
+    api("/api/members"), api("/api/chores"), api("/api/chores/stats"), api("/api/purchases"),
+  ]);
+  const memberOpts = (sel, rotate) => `
+    <option value="">Cualquiera</option>
+    <option value="rotate" ${rotate ? "selected" : ""}>Por turnos</option>
+    ${members.map((m) => `<option value="${m.id}" ${m.id === sel ? "selected" : ""}>${esc(m.emoji)} ${esc(m.name)}</option>`).join("")}`;
+  const every = (d) => d === 1 ? "todos los días" : d === 7 ? "cada semana" : d === 14 ? "cada 15 días" : d === 30 ? "cada mes" : `cada ${d} días`;
+
+  view.innerHTML = `
+    <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(320px,1fr))">
+      <section class="card stack">
+        <h2>Personas de la casa</h2>
+        <ul class="clean">${members.map((m) => `
+          <li class="row spread"><span style="font-size:1.1rem">${esc(m.emoji)} ${esc(m.name)}</span>
+            <span class="row"><span class="muted small">${stats.find((s) => s.id === m.id)?.done ?? 0} tareas en 30 días</span>
+            <button class="ghost danger" data-del-m="${m.id}" title="Quitar">✕</button></span></li>`).join("") || `<li class="muted">Aún no hay nadie.</li>`}
+        </ul>
+        <form id="mf" class="row">
+          <input name="emoji" value="🙂" style="width:3.5rem;text-align:center" aria-label="Emoji">
+          <input name="name" placeholder="Nombre" required style="flex:1">
+          <button type="submit">Agregar</button>
+        </form>
+      </section>
+      <section class="card stack">
+        <h2>Gastos en compras</h2>
+        <div><span style="font-size:1.6rem;font-weight:700">${fmtMoney(spend.month_total)}</span>
+          <span class="muted"> este mes · ${spend.month_count} compras</span></div>
+        <ul class="clean small">${spend.recent.map((p) => `
+          <li class="row spread"><span>${esc(p.store || "Compra")} · ${new Date(p.day + "T12:00").toLocaleDateString("es")}</span>
+            <span>${fmtMoney(p.total)} <span class="muted">(${p.items} productos)</span></span></li>`).join("") || `<li class="muted">Escaneen una factura desde la pantalla de la casa.</li>`}</ul>
+      </section>
+    </div>
+    <section class="card stack" style="margin-top:.75rem">
+      <h2>Tareas del hogar</h2>
+      <table><thead><tr><th></th><th>Tarea</th><th>Frecuencia (días)</th><th>¿A quién le toca?</th><th>Próxima</th><th></th></tr></thead>
+        <tbody>${chores.map((c) => `
+          <tr data-id="${c.id}">
+            <td><select data-f="emoji">${META.chore_emojis.map((e) => `<option ${e === c.emoji ? "selected" : ""}>${e}</option>`).join("")}</select></td>
+            <td><input data-f="name" value="${esc(c.name)}"></td>
+            <td><input data-f="every_days" type="number" min="1" value="${c.every_days}" style="width:5rem" title="${every(c.every_days)}"></td>
+            <td><select data-f="who">${memberOpts(c.member_id, c.rotate)}</select></td>
+            <td class="small">${c.is_due ? `<span class="badge warn">hoy${c.days_late ? ` (+${c.days_late})` : ""}</span>` : new Date(c.due_on + "T12:00").toLocaleDateString("es")}</td>
+            <td><button class="ghost danger" data-del-c="${c.id}" title="Quitar">✕</button></td>
+          </tr>`).join("")}</tbody></table>
+      <form id="cf" class="row">
+        <select name="emoji">${META.chore_emojis.map((e) => `<option>${e}</option>`).join("")}</select>
+        <input name="name" placeholder="Ej: Sacar la basura" required style="flex:2;min-width:10rem">
+        <label class="row small">cada <input name="every_days" type="number" min="1" value="7" style="width:4.5rem"> días</label>
+        <select name="who">${memberOpts(null, false)}</select>
+        <button type="submit" class="primary">Agregar tarea</button>
+      </form>
+    </section>`;
+
+  const whoFields = (v) => v === "rotate" ? { member_id: null, rotate: true } : { member_id: v ? +v : null, rotate: false };
+  $("#mf").onsubmit = (e) => {
+    e.preventDefault();
+    safe(async () => {
+      await api("/api/members", { method: "POST", json: { name: e.target.name.value, emoji: e.target.emoji.value || "🙂" } });
+      renderHouse();
+    });
+  };
+  $("#cf").onsubmit = (e) => {
+    e.preventDefault();
+    const f = e.target;
+    safe(async () => {
+      await api("/api/chores", { method: "POST", json: {
+        name: f.name.value, emoji: f.emoji.value, every_days: +f.every_days.value || 7, ...whoFields(f.who.value),
+      } });
+      renderHouse();
+    });
+  };
+  $$("tr[data-id] [data-f]", view).forEach((el) => el.onchange = () => safe(async () => {
+    const tr = el.closest("tr");
+    const get = (f) => $(`[data-f=${f}]`, tr).value;
+    await api(`/api/chores/${tr.dataset.id}`, { method: "PUT", json: {
+      name: get("name"), emoji: get("emoji"), every_days: +get("every_days") || 7, ...whoFields(get("who")),
+    } });
+    toast("Tarea actualizada");
+    renderHouse();
+  }));
+  $$("[data-del-c]", view).forEach((b) => b.onclick = () => safe(async () => {
+    if (!confirm("¿Quitar esta tarea?")) return;
+    await api(`/api/chores/${b.dataset.delC}`, { method: "DELETE" });
+    renderHouse();
+  }));
+  $$("[data-del-m]", view).forEach((b) => b.onclick = () => safe(async () => {
+    if (!confirm("¿Quitar a esta persona?")) return;
+    await api(`/api/members/${b.dataset.delM}`, { method: "DELETE" });
+    renderHouse();
+  }));
 }
 
 // ------------------------------------------------------------------ inicio

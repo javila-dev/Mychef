@@ -1,0 +1,14 @@
+{
+  "name": "Nuestra casa",
+  "short_name": "Casa",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#faf7f2",
+  "theme_color": "#c2562b",
+  "lang": "es",
+  "icons": [
+    { "src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

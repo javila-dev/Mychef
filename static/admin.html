@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MyChef · Administrar</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍲</text></svg>">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="row"><a class="btn" href="/" title="Volver a la pantalla de la casa">🏠 Casa</a><h1>Administrar</h1></div>
+    <label class="household">Personas en casa
+      <input id="household" type="number" min="1" max="50" value="4">
+    </label>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button data-view="menu" class="active">Menú</button>
+    <button data-view="cook">¿Qué cocino?</button>
+    <button data-view="recipes">Recetas</button>
+    <button data-view="pantry">Despensa</button>
+    <button data-view="shopping">Compras</button>
+    <button data-view="house">Casa y tareas</button>
+  </nav>
+
+  <main id="view"></main>
+
+  <dialog id="modal"><div id="modal-body"></div></dialog>
+  <div id="toast" role="status"></div>
+
+  <script src="/static/admin.js" type="module"></script>
+</body>
+</html>

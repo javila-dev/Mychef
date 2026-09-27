@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 
 from . import services
 from .db import engine, init_db
-from .models import Recipe
+from .models import Chore, Member, PantryItem, Recipe
 
 EXAMPLES = [
     {
@@ -89,6 +89,18 @@ EQUIVALENCES = {
 }
 
 
+MEMBERS = [("Mamá", "👩"), ("Papá", "👨"), ("Sofi", "👧")]
+CHORES = [
+    # (tarea, emoji, cada cuántos días, persona fija o None, por turnos)
+    ("Sacar la basura", "🗑️", 2, None, True),
+    ("Lavar la loza", "🍽️", 1, None, True),
+    ("Regar las plantas", "🪴", 3, "Sofi", False),
+    ("Cambiar las sábanas", "🛏️", 7, "Papá", False),
+    ("Limpiar la nevera", "🧽", 14, None, False),
+]
+MINIMUMS = {"Huevo": 12, "Arroz": 1, "Leche": 2}
+
+
 class _Line:
     def __init__(self, name, quantity, unit, category, note, optional):
         self.name, self.quantity, self.unit = name, quantity, unit
@@ -111,6 +123,20 @@ def main() -> None:
         for name, qty, unit, days in PANTRY:
             expires = today + dt.timedelta(days=days) if days is not None else None
             services.add_to_pantry(session, name, qty, unit, expires_on=expires)
+        services.add_to_pantry(session, "Leche", 1, "l", "lácteos y huevos")
+        services.add_to_pantry(session, "Papel higiénico", 4, "unidad", "aseo y limpieza")
+        for name, minimum in MINIMUMS.items():
+            ing = services.get_or_create_ingredient(session, name)
+            item = session.exec(select(PantryItem).where(PantryItem.ingredient_id == ing.id)).one()
+            item.min_quantity = minimum  # en la misma unidad en que está guardado
+        people = {}
+        for name, emoji in MEMBERS:
+            people[name] = Member(name=name, emoji=emoji)
+            session.add(people[name])
+        session.flush()
+        for name, emoji, every, who, rotate in CHORES:
+            session.add(Chore(name=name, emoji=emoji, every_days=every,
+                              member_id=people[who].id if who else None, rotate=rotate))
         for name, (per_cup, per_unit) in EQUIVALENCES.items():
             ing = services.get_or_create_ingredient(session, name)
             ing.g_per_ml = per_cup / 240 if per_cup else None

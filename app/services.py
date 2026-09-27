@@ -22,6 +22,7 @@ from .models import (
 from .units import dimension, humanize, normalize_unit, to_base
 
 EXPIRING_DAYS = 3
+MEAL_ORDER = {"desayuno": 0, "almuerzo": 1, "merienda": 2, "cena": 3}
 
 
 # ---------------------------------------------------------------- ingredientes
@@ -78,6 +79,7 @@ def add_to_pantry(
     category: str | None = None,
     expires_on: dt.date | None = None,
     replace: bool = False,
+    min_quantity: float | None = None,
 ) -> PantryItem:
     """Suma (o reemplaza) una cantidad en la despensa, convirtiendo unidades si se puede."""
     unit = normalize_unit(unit)
@@ -94,6 +96,8 @@ def add_to_pantry(
         if expires_on:
             item.expires_on = expires_on
         item.updated_at = utcnow()
+    if min_quantity is not None:
+        item.min_quantity = min_quantity
     session.add(item)
     session.flush()
     return item
