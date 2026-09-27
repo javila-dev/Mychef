@@ -241,7 +241,7 @@ async function renderHome() {
     </div>`;
 
   const ACTS = {
-    scan: scanChooser, receipt: receiptModal, shopping: () => go("shopping"), what: () => go("what"),
+    scan: scanChooser, receipt: () => startScan("receipt"), shopping: () => go("shopping"), what: () => go("what"),
     ranout: ranOutModal, chores: () => go("chores"), photos: photosModal,
   };
   $$("[data-act]", app).forEach((b) => b.onclick = () => ACTS[b.dataset.act]());
@@ -388,7 +388,7 @@ async function renderChores() {
 
 // ---------------------------------------------------------------- factura (en una ventana)
 
-function receiptModal() {
+function receiptModal(remote = null) {
   const state = { photos: [], draft: null };
   const m = modal({ title: "Escanear factura", size: "wide", body: `<div id="rc"></div>` });
   const box = $("#rc", m.el);
@@ -481,7 +481,9 @@ function receiptModal() {
       } }));
       if (!res) return;
       m.close();
-      await doneModal("¡Guardado!", `${res.added} productos quedaron en la casa.`);
+      const text = `${res.added} productos de la factura quedaron en la casa.`;
+      if (remote) await reportRemote(remote, text);
+      await doneModal("¡Guardado!", remote ? `${text} Ya se ve en la tablet.` : text);
       refresh();
     });
   };
@@ -502,12 +504,81 @@ function scanChooser() {
   });
   $$("[data-c]", m.el).forEach((b) => b.onclick = () => {
     m.close();
-    b.dataset.c === "receipt" ? receiptModal() : fridgeModal(b.dataset.c);
+    startScan(b.dataset.c);
   });
 }
 
+// ¿Con qué toman la foto? La tablet vive pegada a la nevera, así que su cámara no ve adentro:
+// lo más cómodo suele ser el celular (escanea un código y la foto llega a la casa).
+const SCAN_WHAT = { receipt: "la factura", nevera: "la nevera", alacena: "la alacena" };
+const isPhone = () => window.matchMedia("(max-width: 760px)").matches;
+
+function openScan(kind, remote = null) {
+  kind === "receipt" ? receiptModal(remote) : fridgeModal(kind, remote);
+}
+
+function startScan(kind) {
+  if (isPhone()) return openScan(kind); // ya están en el celular
+  const m = modal({
+    title: `¿Con qué le toman la foto a ${SCAN_WHAT[kind]}?`, size: "narrow",
+    body: `<div class="choices">
+      <button class="choice" data-h="phone">${icon("phone", 36)}<span><b>Con el celular</b>
+        <small>Apuntan la cámara del celular a un código y listo. La tablet se queda en su sitio.</small></span></button>
+      <button class="choice" data-h="tablet">${icon("tablet", 36)}<span><b>Con esta tablet</b>
+        <small>Hay que despegarla un momento de la nevera para tomar la foto.</small></span></button>
+    </div>`,
+  });
+  $$("[data-h]", m.el).forEach((b) => b.onclick = () => {
+    m.close();
+    b.dataset.h === "phone" ? phoneScanModal(kind) : openScan(kind);
+  });
+}
+
+async function phoneScanModal(kind) {
+  const ses = await safe(() => api("/api/scan-sessions", { method: "POST", json: { kind } }));
+  if (!ses) return;
+  busy = true;
+  const m = modal({
+    title: "Tómenla con el celular", size: "narrow",
+    body: `<div class="qr-box">
+      <img src="/api/scan-sessions/${ses.id}/qr.svg" alt="Código para abrir en el celular" width="220" height="220">
+      <ol class="qr-steps">
+        <li>Abran la <b>cámara</b> del celular y apunten a este código.</li>
+        <li>Toquen el enlace que aparece en la pantalla del celular.</li>
+        <li>Tomen la foto de ${SCAN_WHAT[kind]} y guarden.</li>
+      </ol>
+      <p class="qr-status" id="qs" role="status">${icon("clock", 20)} Esperando el celular…</p>
+      ${ses.local_only ? `<p class="qr-warn">${icon("warn", 20)} Esta tablet abrió la app como «localhost» y el celular no va a poder entrar.
+        Ábranla con la dirección de la red de la casa (por ejemplo http://192.168.1.20:8000).</p>` : ""}
+      <p class="muted small qr-url">¿No lee el código? En el celular escriban:<br><b>${esc(ses.url)}</b></p>
+    </div>`,
+    actions: [{ label: "Mejor con esta tablet", value: "tablet", icon: "tablet" }, { label: "Cancelar", value: false }],
+  });
+  const poll = setInterval(async () => {
+    let st;
+    try { st = await api(`/api/scan-sessions/${ses.id}`); } catch { clearInterval(poll); return; }
+    if (st.status === "opened") $("#qs", m.el).innerHTML = `${icon("check", 20)} El celular ya lo abrió. Tomen la foto…`;
+    if (st.status === "done") {
+      clearInterval(poll);
+      m.close("done");
+      say(`Listo. ${st.summary}`);
+      await doneModal("¡Listo!", st.summary || "Quedó guardado desde el celular.");
+      refresh();
+    }
+  }, 2000);
+  m.done.then((v) => {
+    clearInterval(poll);
+    busy = false;
+    if (v === "tablet") openScan(kind);
+  });
+}
+
+async function reportRemote(remote, summary) {
+  try { await api(`/api/scan-sessions/${remote}/done`, { method: "POST", json: { summary } }); } catch { /* la tablet ya no espera */ }
+}
+
 // Fotos de la nevera o la alacena: la IA dice qué ve y cuánto queda; la familia revisa y guarda.
-function fridgeModal(place = "nevera") {
+function fridgeModal(place = "nevera", remote = null) {
   const where = place === "alacena" ? "la alacena" : "la nevera";
   const state = { photos: [], draft: null, gone: new Set() };
   const m = modal({ title: `Foto de ${where}`, size: "wide", body: `<div id="fr"></div>` });
@@ -609,7 +680,9 @@ function fridgeModal(place = "nevera") {
       });
       m.close();
       const gone = state.gone.size ? ` ${state.gone.size} pasaron a la lista de compras.` : "";
-      await doneModal("¡Al día!", `${items.length} cosa${items.length === 1 ? "" : "s"} de ${where} quedaron actualizadas.${gone}`);
+      const text = `${items.length} cosa${items.length === 1 ? "" : "s"} de ${where} quedaron actualizadas.${gone}`;
+      if (remote) await reportRemote(remote, text);
+      await doneModal("¡Al día!", remote ? `${text} Ya se ve en la tablet.` : text);
       refresh();
     });
   };
@@ -717,7 +790,7 @@ async function renderShopping() {
     await api(`/api/shopping/extra/${b.dataset.rm}`, { method: "DELETE" });
     renderShopping();
   }));
-  $("#scan")?.addEventListener("click", () => { saveCart(new Set()); receiptModal(); });
+  $("#scan")?.addEventListener("click", () => { saveCart(new Set()); startScan("receipt"); });
   $("#bought")?.addEventListener("click", (ev) => safe(async () => {
     const btn = ev.currentTarget;
     const items = list.filter((i) => cart.has(cartKey(i)));
@@ -1127,8 +1200,8 @@ async function handleVoiceText(text, { box = null, handsFree: hf = false } = {})
   const nav = res.navigate;
   const speaking = say(res.speak);
   if (nav) {
-    if (nav.screen === "receipt") receiptModal();
-    else if (nav.screen === "fridge") fridgeModal(nav.place);
+    if (nav.screen === "receipt") startScan("receipt");
+    else if (nav.screen === "fridge") startScan(nav.place || "nevera");
     else if (nav.screen === "photos") photosModal();
     else if (nav.screen === "cook") go("cook", { recipeId: nav.recipeId });
     else if (nav.screen === "what") go("what", nav.meal ? { meal: nav.meal } : {});
@@ -1154,5 +1227,14 @@ async function start() {
   await home();
   resetIdle();
   startWake();
+  // Llegaron desde el código QR de la tablet: abrir directo la foto.
+  const q = new URLSearchParams(location.search);
+  const kind = q.get("scan");
+  if (kind && SCAN_WHAT[kind]) {
+    const remote = q.get("s");
+    history.replaceState(null, "", "/");
+    if (remote) api(`/api/scan-sessions/${remote}/opened`, { method: "POST" }).catch(() => {});
+    openScan(kind, remote);
+  }
 }
 start();

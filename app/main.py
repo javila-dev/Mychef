@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import datetime as dt
+import io
+import secrets
+import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
+from typing import Literal
+
+import segno
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
@@ -649,6 +655,72 @@ def ran_out(data: ExtraIn, session: Session = SessionDep):
             item.updated_at = utcnow()
     session.commit()
     return add_extra(ExtraIn(name=ing.name if ing else data.name), session)
+
+
+# ---------------------------------------------------------------- foto con el celular
+# La tablet muestra un código QR; el celular lo abre, toma la foto y guarda. La tablet
+# pregunta cada par de segundos si ya terminó. Vive en memoria: dura lo que dura la foto.
+
+SCAN_TTL = 15 * 60
+SCAN_SESSIONS: dict[str, dict] = {}
+
+
+class ScanSessionIn(BaseModel):
+    kind: Literal["receipt", "nevera", "alacena"]
+
+
+class ScanDoneIn(BaseModel):
+    summary: str = Field("", max_length=300)
+
+
+def _scan_session(sid: str) -> dict:
+    now = time.time()
+    for k in [k for k, v in SCAN_SESSIONS.items() if now - v["created"] > SCAN_TTL]:
+        del SCAN_SESSIONS[k]
+    if sid not in SCAN_SESSIONS:
+        raise HTTPException(404, "Este código ya venció. Pidan uno nuevo en la tablet.")
+    return SCAN_SESSIONS[sid]
+
+
+@app.post("/api/scan-sessions", status_code=201)
+def new_scan_session(data: ScanSessionIn, request: Request):
+    sid = secrets.token_urlsafe(9)
+    url = f"{str(request.base_url).rstrip('/')}/?scan={data.kind}&s={sid}"
+    SCAN_SESSIONS[sid] = {"kind": data.kind, "status": "waiting", "summary": "", "url": url, "created": time.time()}
+    return {
+        "id": sid,
+        "url": url,
+        # Con "localhost" el celular no llega: hay que abrir la app en la tablet con la IP del servidor.
+        "local_only": request.url.hostname in ("localhost", "127.0.0.1", "::1"),
+    }
+
+
+@app.get("/api/scan-sessions/{sid}")
+def get_scan_session(sid: str):
+    s = _scan_session(sid)
+    return {"kind": s["kind"], "status": s["status"], "summary": s["summary"]}
+
+
+@app.get("/api/scan-sessions/{sid}/qr.svg", include_in_schema=False)
+def scan_session_qr(sid: str):
+    buf = io.BytesIO()
+    segno.make(_scan_session(sid)["url"], error="m").save(buf, kind="svg", scale=8, border=2, dark="#123d2a")
+    return Response(buf.getvalue(), media_type="image/svg+xml", headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/scan-sessions/{sid}/opened")
+def scan_session_opened(sid: str):
+    s = _scan_session(sid)
+    if s["status"] == "waiting":
+        s["status"] = "opened"
+    return {"status": s["status"]}
+
+
+@app.post("/api/scan-sessions/{sid}/done")
+def scan_session_done(sid: str, data: ScanDoneIn):
+    s = _scan_session(sid)
+    s["status"], s["summary"] = "done", data.summary
+    return {"status": "done"}
 
 
 # ---------------------------------------------------------------- facturas

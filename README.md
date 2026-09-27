@@ -31,6 +31,12 @@ pocas palabras, siempre un **← Volver**, y si nadie la toca por 2 minutos vuel
   La IA dice qué ve y **cuánto queda** (la leche a la mitad = 500 ml); se revisa y se toca **Poner al día**.
   Lo que según el inventario debía estar y no salió en la foto aparece como «¿Se acabó?»: al tocarlo pasa
   a la lista de compras. También por voz: «Oye casa, escanea la nevera».
+- **¿Con el celular o con la tablet?** Antes de cada foto (factura, nevera o alacena) la tablet pregunta:
+  - **Con el celular**: la tablet muestra un código QR; lo apuntan con la cámara del celular, se abre la
+    app directo en la foto, y al guardar la tablet dice «¡Listo!» y se actualiza sola. La tablet no se mueve.
+    Para que funcione, la tablet debe tener la app abierta con la dirección de la red
+    (`http://192.168.x.x:8000`), no con `localhost`, y el celular estar en el mismo wifi.
+  - **Con esta tablet**: la de siempre; hay que despegarla un momento de la nevera.
 
 ### Qué tan exigente es con lo que hay
 

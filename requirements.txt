@@ -3,3 +3,4 @@ uvicorn[standard]>=0.30
 sqlmodel>=0.0.22
 python-multipart>=0.0.9
 anthropic>=1.8
+segno>=1.6

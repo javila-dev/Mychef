@@ -293,3 +293,18 @@ def test_fridge_scan_several_photos_and_not_seen(client, monkeypatch):
     client.post("/api/pantry/bulk", json=[{"name": "Leche", "quantity": 500, "unit": "ml", "replace": True}])
     leche = next(p for p in client.get("/api/pantry").json() if p["name"] == "Leche")
     assert (leche["quantity"], leche["unit"]) == (500, "ml")
+
+
+def test_scan_with_phone_session(client):
+    res = client.post("/api/scan-sessions", json={"kind": "nevera"})
+    assert res.status_code == 201
+    sid, url = res.json()["id"], res.json()["url"]
+    assert url.endswith(f"/?scan=nevera&s={sid}")
+    assert client.get(f"/api/scan-sessions/{sid}/qr.svg").headers["content-type"].startswith("image/svg")
+    assert client.get(f"/api/scan-sessions/{sid}").json()["status"] == "waiting"
+    client.post(f"/api/scan-sessions/{sid}/opened")
+    assert client.get(f"/api/scan-sessions/{sid}").json()["status"] == "opened"
+    client.post(f"/api/scan-sessions/{sid}/done", json={"summary": "3 cosas de la nevera"})
+    assert client.get(f"/api/scan-sessions/{sid}").json() == {"kind": "nevera", "status": "done", "summary": "3 cosas de la nevera"}
+    assert client.get("/api/scan-sessions/nope").status_code == 404
+    assert client.post("/api/scan-sessions", json={"kind": "otra"}).status_code == 422

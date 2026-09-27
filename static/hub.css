@@ -275,6 +275,13 @@ body.at-home #toast.show { transform: translateY(0); }
 .choice:hover { background: var(--green-mist) !important; }
 .choice b { display: block; color: var(--ink); font-size: 1.15rem; font-weight: 600; }
 .choice small { color: var(--muted); font-size: .95rem; }
+.qr-box { display: grid; justify-items: center; gap: .6rem; text-align: left; }
+.qr-box img { background: #fff; border-radius: 16px; padding: 6px; box-shadow: 0 0 0 1px var(--line); }
+.qr-steps { margin: .2rem 0 0; padding-left: 1.4rem; font-size: 1.05rem; line-height: 1.45; justify-self: stretch; }
+.qr-status { display: flex; align-items: center; gap: .5rem; margin: .2rem 0 0; padding: .55rem .9rem; border-radius: 999px;
+  background: var(--green-mist); color: var(--green-ink); font-weight: 500; }
+.qr-warn { display: flex; gap: .5rem; margin: 0; padding: .7rem .9rem; border-radius: 14px; background: var(--honey-soft); color: var(--honey); }
+.qr-url { text-align: center; margin: 0; word-break: break-all; }
 .group-label { font-weight: 600; color: var(--muted); margin: 1.1rem 0 .2rem; font-size: .95rem; }
 
 .gallery { display: grid; gap: .6rem; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
