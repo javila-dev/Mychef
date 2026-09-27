@@ -106,20 +106,20 @@ declina una solicitud, la API la reintenta con otro modelo automáticamente.
 
 ## Diseño
 
-- **Colores**: verde huerta como color principal, fondo de papel de lino, y acentos en miel, terracota
-  y salvia. Tiene modo oscuro automático (útil de noche en la tablet).
-- **Letras**: *Alegreya* para títulos (serif caligráfica de Huerta Tipográfica, con aire de recetario
-  escrito a mano) y *Atkinson Hyperlegible* para el texto, diseñada para leerse fácil. Ambas vienen
-  incluidas en `static/fonts/` (licencia SIL OFL), así que funcionan aunque la tablet no tenga internet.
-- **Íconos** dibujados para la app (también los de las tareas), en lugar de emojis.
-- Pulida con las guías de [Impeccable](https://impeccable.style): sin sombras decorativas ni adornos,
-  botones que muestran "procesando" y no registran dos veces con un doble toque, pantallas de carga
-  y de error con lenguaje de la casa, y soporte para "reducir movimiento" del sistema.
-- Las **confirmaciones y formularios** se abren en ventanas (modales) que se cierran con la X,
-  con Esc o tocando fuera; nunca con los cuadros de diálogo del navegador.
-- Las cantidades se muestran como en la cocina: "½ taza", "1 ⅓ unidades".
-- En ⚙️ Administrar → Casa y tareas se le puede poner **nombre a la casa** ("Casa Ávila"), que aparece
-  en la pantalla de la tablet.
+- **Referencia**: la pantalla de nevera **Samsung Family Hub**. El inicio muestra las **fotos de la
+  familia** a pantalla completa (van cambiando solas cada 45 segundos), la hora grande, dos widgets
+  (menú de hoy y tareas) y una bandeja de apps redondas: Escanear factura, Lista de compras,
+  ¿Qué cocino?, Se acabó algo y Fotos. Ajustes está en el botón de la esquina.
+- **Fotos**: se suben desde la app **Fotos** del inicio (desde la tablet o el celular). Se guardan en
+  `data/photos/` junto a la base de datos. Mientras no haya fotos se ve un paisaje de colinas y un
+  widget que invita a ponerlas.
+- **Letra**: *Lexend*, una sola familia diseñada para leerse fácil, incluida en `static/fonts/`
+  (licencia SIL OFL), así que funciona sin internet.
+- **Colores**: grises neutros, superficies blancas y un verde como acento; modo oscuro automático.
+- Personas con su inicial en un círculo de color; tareas con íconos dibujados para la app.
+- Confirmaciones y formularios en ventanas (modales); nunca los cuadros de diálogo del navegador.
+- Rediseñada siguiendo el proceso de [Impeccable](https://impeccable.style) (dirección registrada en
+  `PRODUCT.md` y `.impeccable/surfaces/`, detector sin hallazgos y revisión final independiente).
 
 ## Desarrollo
 
@@ -141,7 +141,8 @@ app/
   vision.py    Reconocimiento con Claude (facturas, despensa y recetas)
   seed.py      Datos de ejemplo
 static/        index.html + hub.js/hub.css: pantalla de la casa · admin.html + admin.js: Administrar
-               common.js: íconos, modales y utilidades · styles.css: identidad visual · fonts/
+               common.js: íconos, avatares, modales y utilidades · styles.css: base visual
+               wallpaper.svg: fondo sin fotos · fonts/: Lexend
 tests/         Pruebas
 ```
 

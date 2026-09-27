@@ -152,3 +152,27 @@ def test_house_name_setting(client):
     client.put("/api/settings", json={"household_size": 5})
     meta = client.get("/api/meta").json()
     assert (meta["house_name"], meta["household_size"]) == ("Casa Ávila", 5)
+
+
+PNG_1PX = bytes.fromhex(
+    "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+    "1f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082"
+)
+
+
+def test_family_photos(client, tmp_path, monkeypatch):
+    from app import db
+    monkeypatch.setattr(db, "PHOTOS_DIR", tmp_path / "photos")
+    assert client.get("/api/photos").json() == []
+    bad = client.post("/api/photos", files={"photo": ("x.gif", b"GIF89a", "image/gif")})
+    assert bad.status_code == 400
+    res = client.post("/api/photos", files={"photo": ("fam.png", PNG_1PX, "image/png")}, data={"caption": "Navidad"})
+    assert res.status_code == 201
+    photo = res.json()
+    assert photo["caption"] == "Navidad"
+    got = client.get(photo["url"])
+    assert got.status_code == 200 and got.content == PNG_1PX
+    assert len(list((tmp_path / "photos").iterdir())) == 1
+    assert client.delete(f"/api/photos/{photo['id']}").status_code == 204
+    assert client.get(photo["url"]).status_code == 404
+    assert list((tmp_path / "photos").iterdir()) == []

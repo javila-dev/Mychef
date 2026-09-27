@@ -185,3 +185,12 @@ class ShoppingExtra(SQLModel, table=True):
     quantity: Optional[float] = None
     unit: Optional[str] = None
     created_at: dt.datetime = Field(default_factory=utcnow)
+
+
+class FamilyPhoto(SQLModel, table=True):
+    """Foto de la familia para el fondo de la pantalla de la casa."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    filename: str
+    caption: str = ""
+    created_at: dt.datetime = Field(default_factory=utcnow)

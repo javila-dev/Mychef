@@ -4,7 +4,7 @@
 // y si nadie la toca un rato, vuelve sola al inicio.
 
 import {
-  $, $$, api, cap, choreIcon, compressImage, confirmModal, esc, fmtAmount, fmtMoney, icon, isoDate,
+  $, $$, api, avatar, cap, choreIcon, compressImage, confirmModal, esc, fmtAmount, fmtMoney, icon, isoDate,
   modal, mondayOf, safe, toPantryLine, toast, withBusy,
 } from "./common.js";
 
@@ -24,6 +24,7 @@ const SCREENS = { home: renderHome, shopping: renderShopping, what: renderWhat, 
 
 function go(name, params = {}) {
   screen = name;
+  document.body.classList.toggle("at-home", name === "home");
   window.scrollTo(0, 0);
   return safe(() => SCREENS[name](params));
 }
@@ -90,96 +91,144 @@ function daysText(d) {
 }
 
 function homeSkeleton() {
-  app.innerHTML = `<div aria-busy="true" aria-label="Cargando">
-    <div class="skel" style="height:96px;width:min(420px,70%);margin-bottom:1.4rem"></div>
-    <div class="actions">${'<div class="skel" style="min-height:112px"></div>'.repeat(4)}</div>
-    <div class="board"><div class="skel" style="height:260px"></div><div class="skel" style="height:320px"></div></div></div>`;
+  document.body.classList.add("at-home");
+  app.innerHTML = `<div class="skel-home" aria-busy="true" aria-label="Cargando"></div>`;
 }
 
 function errorState(retry) {
-  app.innerHTML = `<div class="panel state-block">${icon("warn", 44)}
+  app.innerHTML = `<div class="state-block">${icon("warn", 44)}
     <h2>No se pudo cargar</h2><p>Revisen que el computador de la casa esté prendido y conectado.</p>
     <button class="primary big" id="retry">${icon("undo")} Intentar de nuevo</button></div>`;
+  document.body.classList.remove("at-home");
   $("#retry").onclick = retry;
 }
 
+// ---------------------------------------------------------------- fotos de la familia (fondo)
+
+const stage = $("#stage");
+const ROTATE_MS = 45 * 1000;
+let PHOTOS = [];
+let photoIdx = -1;
+let rotateTimer = null;
+
+async function loadPhotos() {
+  try { PHOTOS = await api("/api/photos"); } catch { PHOTOS = []; }
+  photoIdx = -1;
+  stage.innerHTML = "";
+  nextPhoto();
+  clearInterval(rotateTimer);
+  if (PHOTOS.length > 1) rotateTimer = setInterval(nextPhoto, ROTATE_MS);
+}
+
+function nextPhoto() {
+  if (!PHOTOS.length) { stage.innerHTML = ""; return; }
+  photoIdx = (photoIdx + 1) % PHOTOS.length;
+  const p = PHOTOS[photoIdx];
+  const img = new Image();
+  img.alt = "";
+  img.decoding = "async";
+  img.onload = () => {
+    stage.appendChild(img);
+    requestAnimationFrame(() => {
+      img.classList.add("on");
+      const old = [...stage.querySelectorAll("img")].filter((x) => x !== img);
+      setTimeout(() => old.forEach((x) => x.remove()), 1800);
+    });
+    const cap = $("#caption");
+    if (cap) cap.textContent = p.caption || "";
+  };
+  img.src = p.url;
+}
+
+// ---------------------------------------------------------------- inicio
+
 async function renderHome() {
-  if (!app.querySelector(".hub-top")) homeSkeleton();
+  document.body.classList.add("at-home");
+  if (!app.querySelector(".home")) homeSkeleton();
   try {
     TODAY = await api("/api/today");
   } catch {
     return errorState(home);
   }
   const t = TODAY;
-  const pending = t.chores.filter((c) => !c.done_today).length;
   const firstRun = !t.setup.recipes && !t.setup.chores && !t.setup.pantry;
-  const listHint = t.shopping_count ? `${t.shopping_count} cosa${t.shopping_count > 1 ? "s" : ""} por comprar` : "No falta nada";
-  const cookHint = t.expiring.length ? `Aprovechar lo que vence` : "Ideas con lo que hay";
+  const pending = t.chores.filter((c) => !c.done_today);
+  const shownChores = [...pending, ...t.chores.filter((c) => c.done_today)].slice(0, 3);
+  const alerts = [
+    ...t.expiring.map((e) => `<span class="${e.days_left < 0 ? "bad" : "warn"}">${icon("clock", 18)} ${esc(e.name)} · ${daysText(e.days_left)}</span>`),
+    ...t.low_stock.map((n) => `<span class="warn">${icon("jar", 18)} Queda poco: ${esc(n)}</span>`),
+  ];
+  const date = cap(new Date().toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" }));
+  const current = PHOTOS[photoIdx];
 
   app.innerHTML = `
-    <header class="hub-top">
-      <div>
-        <h1 class="hub-hello">${greeting()}</h1>
-        <div class="hub-date">${cap(new Date().toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" }))} · <b>${esc(META.house_name)}</b></div>
-      </div>
-      <div class="hub-right">
-        <div class="hub-clock" id="clock">${clock()}</div>
-        <a class="hub-admin" href="/admin" title="Administrar recetas, inventario y tareas" aria-label="Administrar">${icon("sliders", 26)}</a>
-      </div>
-    </header>
+    <div class="home">
+      <header class="time-block">
+        <a class="corner-btn" href="/admin" title="Ajustes: recetas, inventario y tareas" aria-label="Ajustes">${icon("sliders", 24)}</a>
+        <div class="clock" id="clock">${clock()}</div>
+        <div class="today-line">${date}</div>
+        <div class="greet">${greeting()} · ${esc(META.house_name)}</div>
+        ${alerts.length ? `<div class="photo-alerts"><button class="alert-chip" id="alerts">${alerts[0]}${alerts.length > 1 ? ` <span class="more">y ${alerts.length - 1} más</span>` : ""}</button></div>` : ""}
+      </header>
+      <div class="photo-caption" id="caption">${esc(current?.caption ?? "")}</div>
 
-    <nav class="actions">
-      <button class="act act-scan" data-act="receipt">${icon("receipt", 36)}
-        <span><span class="label">Escanear factura</span><span class="hint">Una foto y queda todo guardado</span></span></button>
-      <button class="act act-list" data-act="shopping">${icon("basket", 36)}
-        ${t.shopping_count ? `<span class="count" aria-label="${t.shopping_count} por comprar">${t.shopping_count}</span>` : ""}
-        <span><span class="label">Lista de compras</span><span class="hint">${listHint}</span></span></button>
-      <button class="act act-cook" data-act="what">${icon("pot", 36)}
-        <span><span class="label">¿Qué cocino?</span><span class="hint">${cookHint}</span></span></button>
-      <button class="act act-out" data-act="ranout">${icon("jar", 36)}
-        <span><span class="label">Se acabó algo</span><span class="hint">Anotarlo en la lista</span></span></button>
-    </nav>
-
-    ${firstRun ? `<section class="panel" style="margin-bottom:1.2rem">
-      <div class="panel-title"><h2>Bienvenidos</h2></div>
-      <p style="margin:0">Para empezar, toquen ${icon("sliders", 20)} arriba a la derecha y agreguen sus recetas, las personas de la casa y las tareas.
-        Lo que hay en la nevera se llena solo al <b>escanear las facturas</b> del mercado.</p></section>` : ""}
-
-    <div class="board">
-      <div>
-        <section class="panel menu-card">
-          <h2>Hoy en la mesa</h2>
-          ${t.meals.length ? t.meals.map((m) => `
-            <button class="dish ${m.cooked ? "done" : ""}" data-meal="${m.id}">
-              <span class="line"><span class="when">${esc(MEAL_LABEL[m.meal_type] ?? m.meal_type)}</span><span class="dots"></span>
-                <span class="name">${esc(m.recipe.name)}</span></span>
-              <span class="state ${m.cooked ? "" : m.can_cook ? "ok" : "miss"}">${m.cooked ? `${icon("check", 18)} Ya se cocinó`
-                : m.can_cook ? `${icon("check", 18)} Tenemos todo` : `Falta: ${esc(m.missing.join(", "))}`}</span>
-            </button>`).join("")
-          : t.setup.recipes ? `<p class="empty-note" style="text-align:center">Todavía no hay menú para hoy.</p>
-             <div class="row" style="justify-content:center"><button class="primary big" id="plan">${icon("spark")} Armar el menú de la semana</button></div>`
-          : `<p class="empty-note" style="text-align:center">Cuando carguen sus recetas en ${icon("sliders", 18)} Administrar, aquí aparece lo que se come hoy.</p>`}
-        </section>
-        ${t.expiring.length || t.low_stock.length ? `<section class="panel">
-          <div class="panel-title"><h2>Ojo con esto</h2></div>
-          <div class="labels">
-            ${t.expiring.map((e) => `<span class="label-tag ${e.days_left < 0 ? "bad" : ""}">${icon("clock", 20)} ${esc(e.name)} · ${daysText(e.days_left)}</span>`).join("")}
-            ${t.low_stock.map((n) => `<span class="label-tag low">${icon("jar", 20)} Queda poco: ${esc(n)}</span>`).join("")}
-          </div>
-          ${t.expiring.length ? `<div style="margin-top:1rem"><button class="btn-soft" data-act="what">${icon("pot", 20)} Ver qué cocinar con eso</button></div>` : ""}
+      <div class="widgets">
+        ${!firstRun && !PHOTOS.length ? `<section class="widget">
+          <div class="w-head"><h2 class="w-title">${icon("camera", 22)} Pongan sus fotos</h2></div>
+          <p class="empty-note">Las fotos de la familia se van turnando aquí de fondo.</p>
+          <div class="w-more"><button class="primary" data-act="photos">${icon("plus", 20)} Agregar fotos</button></div>
         </section>` : ""}
+        ${firstRun ? `<section class="widget">
+          <div class="w-head"><h2 class="w-title">${icon("home", 22)} Bienvenidos</h2></div>
+          <p class="empty-note">Toquen ${icon("sliders", 18)} <b>Ajustes</b> (arriba a la derecha) para cargar sus recetas, las personas y las tareas, y <b>Fotos</b> para poner fotos de la familia.</p>
+        </section>` : ""}
+
+        <section class="widget">
+          <div class="w-head"><h2 class="w-title">${icon("pot", 22)} Hoy en el menú</h2></div>
+          ${t.meals.length ? t.meals.map((m) => `
+            <button class="meal-row ${m.cooked ? "done" : ""}" data-meal="${m.id}">
+              <span class="when">${esc(MEAL_LABEL[m.meal_type] ?? m.meal_type)}</span>
+              <span class="what"><span class="dish">${esc(m.recipe.name)}</span>
+                <span class="state ${m.cooked ? "" : m.can_cook ? "ok" : "miss"}">${m.cooked ? `${icon("check", 16)} Ya se cocinó`
+                  : m.can_cook ? `${icon("check", 16)} Tenemos todo` : `Falta: ${esc(m.missing.join(", "))}`}</span></span>
+              ${icon("chevron", 20)}
+            </button>`).join("")
+          : t.setup.recipes ? `<p class="empty-note">Todavía no hay menú para hoy.</p>
+             <div class="w-more"><button class="primary" id="plan">${icon("spark", 20)} Armar el menú de la semana</button></div>`
+          : `<p class="empty-note">Cuando carguen sus recetas, aquí aparece lo que se come hoy.</p>`}
+        </section>
+
+        <section class="widget">
+          <div class="w-head"><h2 class="w-title">${icon("broom", 22)} Tareas de hoy</h2>
+            <small>${t.chores.length ? (pending.length ? `${pending.length} por hacer` : "¡Todo al día!") : ""}</small></div>
+          ${shownChores.length ? shownChores.map(choreRow).join("")
+            : `<p class="empty-note">${t.setup.chores ? "Nada pendiente por hoy." : "Aún no hay tareas. Se agregan en Ajustes."}</p>`}
+          ${t.setup.chores ? `<div class="w-more"><button data-act="chores">Ver todas${t.chores.length > 3 ? ` (${t.chores.length})` : ""}</button></div>` : ""}
+        </section>
+
       </div>
-      <section class="panel note">
-        <div class="panel-title"><h2>Pendientes de hoy</h2>
-          <small>${t.chores.length ? (pending ? `${pending} por hacer` : "¡Todo al día!") : ""}</small></div>
-        ${t.chores.length ? t.chores.map(choreRow).join("")
-          : `<p class="empty-note">${t.setup.chores ? "Nada pendiente por hoy." : `Aún no hay tareas. Se agregan en ${icon("sliders", 18)} → Casa y tareas.`}</p>`}
-        ${t.setup.chores ? `<div style="margin-top:.8rem"><button data-act="chores">${icon("broom", 20)} Ver todas las tareas</button></div>` : ""}
-      </section>
+
+      <nav class="dock" aria-label="Apps de la casa">
+        <button class="app app-scan" data-act="receipt"><span class="disc">${icon("receipt", 34)}</span><span class="name">Escanear factura</span></button>
+        <button class="app app-list" data-act="shopping"><span class="disc">${icon("basket", 34)}
+          ${t.shopping_count ? `<span class="count" aria-label="${t.shopping_count} por comprar">${t.shopping_count}</span>` : ""}</span><span class="name">Lista de compras</span></button>
+        <button class="app app-cook" data-act="what"><span class="disc">${icon("pot", 34)}</span><span class="name">¿Qué cocino?</span></button>
+        <button class="app app-out" data-act="ranout"><span class="disc">${icon("jar", 34)}</span><span class="name">Se acabó algo</span></button>
+        <button class="app app-photos" data-act="photos"><span class="disc">${icon("camera", 34)}</span><span class="name">Fotos</span></button>
+      </nav>
     </div>`;
 
-  const ACTS = { receipt: receiptModal, shopping: () => go("shopping"), what: () => go("what"), ranout: ranOutModal, chores: () => go("chores") };
+  const ACTS = {
+    receipt: receiptModal, shopping: () => go("shopping"), what: () => go("what"),
+    ranout: ranOutModal, chores: () => go("chores"), photos: photosModal,
+  };
   $$("[data-act]", app).forEach((b) => b.onclick = () => ACTS[b.dataset.act]());
+  $("#alerts")?.addEventListener("click", () => modal({
+    title: "Ojo con esto", size: "narrow",
+    body: `<ul class="alert-list">${alerts.map((a) => `<li>${a}</li>`).join("")}</ul>`,
+    actions: [{ label: "Ver qué cocinar con eso", tone: "plain", icon: "pot", onClick: () => { go("what"); } },
+      { label: "Listo", tone: "primary", icon: "check" }],
+  }));
   $$("[data-meal]", app).forEach((el) => el.onclick = () => {
     const m = t.meals.find((x) => x.id === +el.dataset.meal);
     go("cook", { recipeId: m.recipe.id, servings: m.servings, entryId: m.cooked ? null : m.id });
@@ -196,7 +245,7 @@ async function renderHome() {
     const created = await withBusy(btn, () => api("/api/menu/autoplan", { method: "POST", json: {
       start: isoDate(mondayOf(new Date())), days: 7, meal_types: ["almuerzo", "cena"],
     } }));
-    toast(created.length ? "Menú de la semana listo" : "Primero agreguen recetas en Administrar");
+    toast(created.length ? "Menú de la semana listo" : "Primero agreguen recetas en Ajustes");
     home();
   }));
 }
@@ -204,12 +253,55 @@ async function renderHome() {
 setInterval(() => { const c = $("#clock"); if (c) c.textContent = clock(); }, 15000);
 setInterval(() => { if (screen === "home" && !busy && !$("dialog.m[open]")) safe(renderHome); }, 5 * 60 * 1000);
 
+// ---------------------------------------------------------------- fotos (ventana)
+
+async function photosModal() {
+  const m = modal({ title: "Fotos de la familia", size: "wide", body: `<div id="ph"></div>` });
+  const box = $("#ph", m.el);
+  const draw = () => {
+    box.innerHTML = `
+      <p class="m-text" style="margin-bottom:1rem">Estas fotos se van turnando en la pantalla de inicio.</p>
+      <input type="file" id="ph-in" accept="image/*" multiple hidden>
+      <div class="gallery">
+        <label class="add" for="ph-in">${icon("plus", 30)}Agregar fotos</label>
+        ${PHOTOS.map((p) => `<figure><img src="${esc(p.url)}" alt="${esc(p.caption || "Foto de la familia")}" loading="lazy">
+          <button class="rm" data-rm="${p.id}" aria-label="Quitar esta foto">${icon("trash", 20)}</button></figure>`).join("")}
+      </div>`;
+    $("#ph-in", box).onchange = (e) => safe(async () => {
+      const files = [...e.target.files];
+      if (!files.length) return;
+      busy = true;
+      box.querySelector(".add").innerHTML = `${icon("camera", 30)}Subiendo ${files.length} foto${files.length > 1 ? "s" : ""}…`;
+      try {
+        for (const f of files) {
+          const fd = new FormData();
+          fd.append("photo", await compressImage(f, 2400, 0.86));
+          await api("/api/photos", { method: "POST", body: fd });
+        }
+        toast(files.length > 1 ? `${files.length} fotos agregadas` : "Foto agregada");
+      } finally {
+        busy = false;
+        await loadPhotos();
+        draw();
+      }
+    });
+    $$("[data-rm]", box).forEach((b) => b.onclick = () => safe(async () => {
+      const ok = await confirmModal({ title: "¿Quitar esta foto?", text: "Deja de aparecer en la pantalla de inicio.", ok: "Quitar", tone: "danger", okIcon: "trash" });
+      if (!ok) return;
+      await api(`/api/photos/${b.dataset.rm}`, { method: "DELETE" });
+      await loadPhotos();
+      draw();
+    }));
+  };
+  draw();
+}
+
 // ---------------------------------------------------------------- tareas
 
 function choreRow(c) {
   const who = c.done_today
-    ? `Hecho${c.last_done_by ? ` por ${esc(c.last_done_by.emoji)} ${esc(c.last_done_by.name)}` : ""}`
-    : c.turn ? `Le toca a ${esc(c.turn.emoji)} ${esc(c.turn.name)}` : "Cualquiera puede";
+    ? `Hecho${c.last_done_by ? ` por ${avatar(c.last_done_by, 24)} ${esc(c.last_done_by.name)}` : ""}`
+    : c.turn ? `Le toca a ${avatar(c.turn, 24)} ${esc(c.turn.name)}` : "Cualquiera puede";
   const late = !c.done_today && c.days_late ? ` · <span class="late">atrasada ${c.days_late} día${c.days_late > 1 ? "s" : ""}</span>` : "";
   const next = !c.is_due && !c.done_today
     ? ` · ${new Date(c.due_on + "T12:00").toLocaleDateString("es", { weekday: "long", day: "numeric" })}` : "";
@@ -248,7 +340,7 @@ function whoModal(chore, members, after) {
     body: `<p class="m-text" style="margin-bottom:1rem">¿Quién lo hizo?</p>
       <div class="people">
         ${ordered.map((m) => `<button class="person ${m.id === turn ? "turn" : ""}" data-m="${m.id}">
-          <span class="face">${esc(m.emoji)}</span>${esc(m.name)}${m.id === turn ? `<span class="turn-tag">le tocaba</span>` : ""}</button>`).join("")}
+          <span class="face">${avatar(m, 64)}</span>${esc(m.name)}${m.id === turn ? `<span class="turn-tag">le tocaba</span>` : ""}</button>`).join("")}
         <button class="person" data-m=""><span class="face">${icon("people", 40)}</span>Entre todos</button>
       </div>`,
     onOpen: (dlg, close) => $$("[data-m]", dlg).forEach((b) => b.onclick = () => withBusy(b, async () => {
@@ -272,8 +364,8 @@ async function renderChores() {
   const chores = await api("/api/chores");
   TODAY = TODAY ?? await api("/api/today");
   app.innerHTML = `${head("Tareas de la casa")}
-    <section class="panel note">${chores.map(choreRow).join("") || `<p class="empty-note">Aún no hay tareas.</p>`}</section>
-    <p class="muted" style="margin-top:1.2rem">Para agregar o cambiar tareas: ${icon("sliders", 18)} Administrar → Casa y tareas.</p>`;
+    <section class="sheet chores-sheet">${chores.map(choreRow).join("") || `<p class="empty-note">Aún no hay tareas.</p>`}</section>
+    <p class="muted" style="margin-top:1.2rem">Para agregar o cambiar tareas: Ajustes → Casa y tareas.</p>`;
   bindBack();
   bindChores(chores, () => go("chores"));
 }
@@ -446,14 +538,14 @@ async function renderShopping() {
       <input name="name" placeholder="¿Qué hace falta? Por ejemplo: jabón, pan…" autocomplete="off">
       <button class="primary big" type="submit">${icon("plus")} Agregar</button>
     </form>
-    ${list.length ? `<div class="notepad">${groups.map(([reason, label]) => {
+    ${list.length ? `<div class="sheet">${groups.map(([reason, label]) => {
       const items = list.filter((i) => i.reason === reason);
       return items.length ? `<h3>${label}</h3>${items.map(row).join("")}` : "";
     }).join("")}</div>
     <div class="bottom-bar">
       <button class="primary big" id="scan">${icon("receipt")} Ya compré: escanear factura</button>
       <button class="big" id="bought">${icon("check")} Guardar lo marcado sin factura</button>
-    </div>` : `<div class="panel empty">${icon("basket", 48)}<h2>No falta nada</h2></div>`}`;
+    </div>` : `<div class="state-block">${icon("basket", 48)}<h2>No falta nada</h2><p>Lo que anoten aquí o se acabe aparece en esta lista.</p></div>`}`;
   bindBack();
 
   $("#add").onsubmit = (e) => {
@@ -513,16 +605,14 @@ async function renderWhat({ meal } = {}) {
     <div class="meal-tabs">${META.meal_types.map((m) => `
       <button class="${m === meal ? "on" : ""}" data-meal="${m}">${icon(MEAL_ICON[m], 22)} ${esc(MEAL_LABEL[m])}</button>`).join("")}</div>
     ${sugg.length ? `<div class="cards">${sugg.map((s) => `
-      <button class="index-card ${s.can_cook ? "" : "miss"}" data-r="${s.recipe.id}">
-        <div class="top"></div><div class="in">
+      <button class="recipe-card" data-r="${s.recipe.id}">
           <h3>${s.recipe.favorite ? `${icon("star", 20)} ` : ""}${esc(s.recipe.name)}</h3>
           ${s.can_cook ? `<p class="ok">${icon("check", 20)} Tenemos todo</p>`
             : `<p class="miss-txt">Falta: ${esc(s.missing.map((x) => x.name).join(", "))}</p>`}
           ${s.uses_expiring.length ? `<p>${icon("clock", 18)} Aprovecha: ${esc(s.uses_expiring.join(", "))}</p>` : ""}
           ${s.recipe.prep_minutes ? `<p>${icon("clock", 18)} ${s.recipe.prep_minutes} minutos</p>` : ""}
-        </div>
       </button>`).join("")}</div>`
-      : `<div class="panel empty">${icon("pot", 48)}<p>No hay recetas de ${esc(MEAL_LABEL[meal].toLowerCase())}. Se agregan en Administrar.</p></div>`}`;
+      : `<div class="state-block">${icon("pot", 48)}<h2>Sin recetas de ${esc(MEAL_LABEL[meal].toLowerCase())}</h2><p>Se agregan en Ajustes → Recetas.</p></div>`}`;
   bindBack();
   $$("[data-meal]", app).forEach((b) => b.onclick = () => go("what", { meal: b.dataset.meal }));
   $$("[data-r]", app).forEach((el) => el.onclick = () => go("cook", { recipeId: +el.dataset.r, back: { meal } }));
@@ -598,6 +688,7 @@ async function start() {
     return errorState(start);
   }
   document.title = META.house_name;
+  await loadPhotos();
   await home();
   resetIdle();
 }

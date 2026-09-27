@@ -316,3 +316,13 @@ export function confirmModal({ title, text = "", ok = "Sí", cancel = "Cancelar"
     ],
   }).done.then((v) => v === true);
 }
+
+// ---------------------------------------------------------------- avatares de la familia
+// Un círculo con la inicial y un color propio por persona (estable según su id).
+const AVATAR_COLORS = ["#17804f", "#1558b0", "#b45309", "#7b3fa0", "#c2410c", "#0f766e", "#be185d", "#4d7c0f"];
+export function avatar(person, size = 28) {
+  if (!person) return "";
+  const color = AVATAR_COLORS[(person.id ?? 0) % AVATAR_COLORS.length];
+  const initial = (person.name || "?").trim().charAt(0).toUpperCase();
+  return `<span class="avatar" style="--av:${color};width:${size}px;height:${size}px;font-size:${Math.max(12, Math.round(size * 0.48))}px" aria-hidden="true">${esc(initial)}</span>`;
+}

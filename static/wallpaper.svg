@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+  <!-- Fondo por defecto de la pantalla de la casa mientras la familia no sube fotos. -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9fd3c1"/>
+      <stop offset=".55" stop-color="#d9eadf"/>
+      <stop offset="1" stop-color="#f1e7cf"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="1000" fill="url(#sky)"/>
+  <circle cx="1180" cy="300" r="110" fill="#fff4d6" opacity=".9"/>
+  <path d="M0 560 C 220 470 420 500 640 560 S 1080 640 1300 560 S 1520 470 1600 500 V1000 H0 Z" fill="#7fbf98"/>
+  <path d="M0 660 C 260 590 520 620 760 680 S 1220 760 1600 640 V1000 H0 Z" fill="#4f9e72"/>
+  <path d="M0 780 C 300 720 600 760 900 800 S 1400 840 1600 770 V1000 H0 Z" fill="#2f7d55"/>
+  <path d="M0 880 C 360 840 760 870 1100 900 S 1480 920 1600 890 V1000 H0 Z" fill="#1d5e3f"/>
+</svg>

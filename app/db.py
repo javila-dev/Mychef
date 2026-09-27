@@ -7,6 +7,7 @@ from sqlmodel import Session, SQLModel, create_engine
 DB_PATH = os.environ.get("MYCHEF_DB", str(Path(__file__).resolve().parent.parent / "data" / "mychef.db"))
 
 Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+PHOTOS_DIR = Path(os.environ.get("MYCHEF_PHOTOS", str(Path(DB_PATH).parent / "photos")))
 engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
 
 

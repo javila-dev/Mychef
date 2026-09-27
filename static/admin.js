@@ -2,7 +2,7 @@
 
 import {
   $, $$, REASON_TEXT, addDays, api, cap, esc, fmtDay, fmtMoney, fmtQty, isoDate, mondayOf, safe,
-  CHORE_ICONS, choreIcon, compressImage, confirmModal, fmtAmount, fmtUnit, icon, modal as formModal,
+  CHORE_ICONS, avatar, choreIcon, compressImage, confirmModal, fmtAmount, fmtUnit, icon, modal as formModal,
   toPantryLine, toast, withBusy,
 } from "./common.js";
 
@@ -668,7 +668,7 @@ async function renderHouse() {
   const memberOpts = (sel, rotate) => `
     <option value="">Cualquiera</option>
     <option value="rotate" ${rotate ? "selected" : ""}>Por turnos</option>
-    ${members.map((m) => `<option value="${m.id}" ${m.id === sel ? "selected" : ""}>${esc(m.emoji)} ${esc(m.name)}</option>`).join("")}`;
+    ${members.map((m) => `<option value="${m.id}" ${m.id === sel ? "selected" : ""}>${esc(m.name)}</option>`).join("")}`;
   const every = (d) => d === 1 ? "todos los días" : d === 7 ? "cada semana" : d === 14 ? "cada 15 días" : d === 30 ? "cada mes" : `cada ${d} días`;
 
   view.innerHTML = `
@@ -682,7 +682,7 @@ async function renderHouse() {
       <section class="card stack">
         <h2>Personas de la casa</h2>
         <ul class="clean">${members.map((m) => `
-          <li class="row spread"><span style="font-size:1.1rem">${esc(m.emoji)} ${esc(m.name)}</span>
+          <li class="row spread"><span class="row" style="font-size:1.05rem">${avatar(m, 32)} ${esc(m.name)}</span>
             <span class="row"><span class="muted small">${stats.find((s) => s.id === m.id)?.done ?? 0} tareas en 30 días</span>
             <button class="ghost danger" data-del-m="${m.id}" title="Quitar">${icon("close", 18)}</button></span></li>`).join("") || `<li class="muted">Aún no hay nadie.</li>`}
         </ul>
@@ -714,7 +714,6 @@ async function renderHouse() {
     </section>`;
 
   const whoFields = (v) => v === "rotate" ? { member_id: null, rotate: true } : { member_id: v ? +v : null, rotate: false };
-  const FACES = ["👩", "👨", "👧", "👦", "👵", "👴", "🧑", "👶", "🧒", "🐶", "🐱", "🙂"];
   const pickGrid = (name, list, selected, draw = (e) => e) => `<div class="pick">${list.map((e) => `
     <label title="${esc(CHORE_ICONS[e]?.[1] ?? "")}"><input type="radio" name="${name}" value="${e}" ${e === selected ? "checked" : ""}><span>${draw(e)}</span></label>`).join("")}</div>`;
 
@@ -740,13 +739,13 @@ async function renderHouse() {
       title: "Agregar persona",
       body: `<form id="mf" class="stack">
         <label class="field">Nombre<input name="name" required maxlength="40" autocomplete="off" placeholder="Ej: Sofi"></label>
-        <div class="field">Su cara en la tablet${pickGrid("emoji", FACES, "🙂")}</div></form>`,
+        <p class="muted small" style="margin:0">En la tablet aparece con su inicial en un círculo de color.</p></form>`,
       actions: [
         { label: "Cancelar", value: false },
         { label: "Agregar", tone: "primary", icon: "plus", onClick: async (dlg) => {
           const f = $("#mf", dlg);
           if (!f.reportValidity()) return false;
-          const ok = await safe(() => api("/api/members", { method: "POST", json: { name: f.name.value, emoji: f.emoji.value || "🙂" } }));
+          const ok = await safe(() => api("/api/members", { method: "POST", json: { name: f.name.value } }));
           if (!ok) return false;
           renderHouse();
         } },

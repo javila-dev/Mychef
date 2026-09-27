@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from sqlmodel import Session, select
 
 from . import household, services, vision
 from .auth import AuthMiddleware, check_pin, pin_enabled
+from . import db
 from .db import get_session, init_db
 from .models import (
     DISH_TYPES,
@@ -20,6 +22,7 @@ from .models import (
     MEAL_TYPES,
     Chore,
     ChoreLog,
+    FamilyPhoto,
     Ingredient,
     Member,
     ShoppingExtra,
@@ -618,6 +621,60 @@ def save_receipt(data: ReceiptIn, session: Session = SessionDep):
 @app.get("/api/purchases")
 def purchases(session: Session = SessionDep):
     return household.spending(session)
+
+
+# ---------------------------------------------------------------- fotos de la familia
+
+PHOTO_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
+MAX_PHOTO_BYTES = 8 * 1024 * 1024
+
+
+def _photo_out(p: FamilyPhoto) -> dict:
+    return {"id": p.id, "url": f"/api/photos/{p.id}/file", "caption": p.caption}
+
+
+@app.get("/api/photos")
+def list_photos(session: Session = SessionDep):
+    return [_photo_out(p) for p in session.exec(select(FamilyPhoto).order_by(FamilyPhoto.id))]
+
+
+@app.post("/api/photos", status_code=201)
+async def add_photo(
+    photo: UploadFile = File(...), caption: str = Form(""), session: Session = SessionDep
+):
+    ext = PHOTO_TYPES.get(photo.content_type or "")
+    if not ext:
+        raise HTTPException(400, "Esa foto no se puede usar. Prueben con una JPG o PNG.")
+    data = await photo.read()
+    if len(data) > MAX_PHOTO_BYTES:
+        raise HTTPException(400, "La foto es muy pesada (más de 8 MB).")
+    db.PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
+    name = f"{uuid.uuid4().hex}{ext}"
+    (db.PHOTOS_DIR / name).write_bytes(data)
+    item = FamilyPhoto(filename=name, caption=caption.strip()[:80])
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+    return _photo_out(item)
+
+
+@app.get("/api/photos/{photo_id}/file", include_in_schema=False)
+def photo_file(photo_id: int, session: Session = SessionDep):
+    item = session.get(FamilyPhoto, photo_id)
+    path = db.PHOTOS_DIR / item.filename if item else None
+    if not path or not path.is_file():
+        raise HTTPException(404, "Foto no encontrada")
+    return FileResponse(path, headers={"Cache-Control": "private, max-age=31536000, immutable"})
+
+
+@app.delete("/api/photos/{photo_id}", status_code=204)
+def delete_photo(photo_id: int, session: Session = SessionDep):
+    item = session.get(FamilyPhoto, photo_id)
+    if not item:
+        return
+    (db.PHOTOS_DIR / item.filename).unlink(missing_ok=True)
+    session.delete(item)
+    session.commit()
 
 
 # ---------------------------------------------------------------- hoy y tareas
