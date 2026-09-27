@@ -11,6 +11,8 @@ services:
       # Opcional: PIN de la casa (recomendado si la app queda publicada en internet)
       - MYCHEF_PIN=${MYCHEF_PIN:-}
       - MYCHEF_SECRET=${MYCHEF_SECRET:-}
+      # Opcional: usar PostgreSQL en vez del archivo SQLite de ./data
+      # - MYCHEF_DATABASE_URL=postgresql://usuario:clave@servidor:5432/mychef
       # Zona horaria de la casa (para saber qué día es y a qué hora recordar las tareas)
       - MYCHEF_TZ=${MYCHEF_TZ:-America/Bogota}
     volumes:

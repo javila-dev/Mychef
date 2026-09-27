@@ -112,6 +112,27 @@ personales de GitHub traen horas gratis al mes. Para la IA, guarden `GEMINI_API_
 docker compose up -d
 ```
 
+### Con PostgreSQL
+
+Por defecto la app guarda todo en un archivo SQLite (`data/mychef.db`), sin instalar nada. Si ya tienen
+PostgreSQL en su servidor, creen una base vacía y denle la dirección:
+
+```bash
+createdb mychef
+export MYCHEF_DATABASE_URL=postgresql://usuario:clave@servidor:5432/mychef
+uvicorn app.main:app --host 0.0.0.0 --port 8000     # crea las tablas sola
+```
+
+¿Ya tenían datos en SQLite? Cópienlos una vez a la base nueva (debe estar vacía):
+
+```bash
+MYCHEF_DATABASE_URL=postgresql://… python -m app.copy_to_postgres data/mychef.db
+```
+
+Las fotos de la familia siguen siendo archivos (`data/photos`, o `MYCHEF_PHOTOS`): cópienlas o monten esa
+carpeta en el servidor. Para correr las pruebas contra PostgreSQL:
+`MYCHEF_TEST_DATABASE_URL=postgresql://…/mychef_test pytest`.
+
 **Zona horaria**: la app usa la hora de Colombia (`America/Bogota`) para saber qué día es, aunque el
 computador o el servidor estén en otra hora. Para cambiarla: `MYCHEF_TZ=America/Mexico_City` (o la que sea).
 
@@ -248,6 +269,7 @@ app/
   household.py Tareas del hogar, facturas, mínimos de inventario y el resumen de "Hoy"
   auth.py      PIN opcional de la casa
   clock.py     La hora y el día de la casa (MYCHEF_TZ)
+  db.py        SQLite o PostgreSQL (MYCHEF_DATABASE_URL); copy_to_postgres.py pasa los datos
   services.py  Escalar recetas, disponibilidad, sugerencias, plan semanal, compras
   units.py     Unidades y conversiones
   ai.py        Proveedores de IA: Gemini (fotos) y OpenAI (texto), claves y modelos
