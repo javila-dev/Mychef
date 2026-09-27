@@ -129,9 +129,21 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000     # crea las tablas sola
 MYCHEF_DATABASE_URL=postgresql://… python -m app.copy_to_postgres data/mychef.db
 ```
 
-Las fotos de la familia siguen siendo archivos (`data/photos`, o `MYCHEF_PHOTOS`): cópienlas o monten esa
-carpeta en el servidor. Para correr las pruebas contra PostgreSQL:
+Las fotos de la familia no van en la base: quedan en `data/photos` (o `MYCHEF_PHOTOS`), o en MinIO (abajo). Para correr las pruebas contra PostgreSQL:
 `MYCHEF_TEST_DATABASE_URL=postgresql://…/mychef_test pytest`.
+
+### Fotos de la familia en MinIO (o cualquier S3)
+
+```bash
+export MYCHEF_S3_ENDPOINT=https://minio.midominio.com    # o http://minio:9000 dentro de Docker
+export MYCHEF_S3_ACCESS_KEY=...
+export MYCHEF_S3_SECRET_KEY=...
+export MYCHEF_S3_BUCKET=mychef                           # se crea solo; puede (y debe) ser privado
+python -m app.storage     # una vez: sube a MinIO las fotos que ya estaban en data/photos
+```
+
+Las fotos siempre pasan por la app (`/api/photos/{id}/file`), así el bucket no necesita ser público y el
+PIN de la casa las sigue protegiendo. Con PostgreSQL + MinIO, el contenedor de la app no guarda nada en disco.
 
 **Zona horaria**: la app usa la hora de Colombia (`America/Bogota`) para saber qué día es, aunque el
 computador o el servidor estén en otra hora. Para cambiarla: `MYCHEF_TZ=America/Mexico_City` (o la que sea).
@@ -270,6 +282,7 @@ app/
   auth.py      PIN opcional de la casa
   clock.py     La hora y el día de la casa (MYCHEF_TZ)
   db.py        SQLite o PostgreSQL (MYCHEF_DATABASE_URL); copy_to_postgres.py pasa los datos
+  storage.py   Fotos de la familia en disco o en MinIO / S3 (MYCHEF_S3_*)
   services.py  Escalar recetas, disponibilidad, sugerencias, plan semanal, compras
   units.py     Unidades y conversiones
   ai.py        Proveedores de IA: Gemini (fotos) y OpenAI (texto), claves y modelos

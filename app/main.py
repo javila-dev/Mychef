@@ -17,7 +17,7 @@ import segno
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from . import ai, clock, household, services, vision, voice
+from . import ai, clock, household, services, storage, vision, voice
 from .auth import AuthMiddleware, check_pin, pin_enabled
 from . import db
 from .db import get_session, init_db
@@ -866,9 +866,11 @@ async def add_photo(
     data = await photo.read()
     if len(data) > MAX_PHOTO_BYTES:
         raise HTTPException(400, "La foto es muy pesada (más de 8 MB).")
-    db.PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
     name = f"{uuid.uuid4().hex}{ext}"
-    (db.PHOTOS_DIR / name).write_bytes(data)
+    try:
+        storage.photos().save(name, data, photo.content_type or "image/jpeg")
+    except storage.StorageError as e:
+        raise HTTPException(502, str(e)) from e
     item = FamilyPhoto(filename=name, caption=caption.strip()[:80])
     session.add(item)
     session.commit()
@@ -879,10 +881,15 @@ async def add_photo(
 @app.get("/api/photos/{photo_id}/file", include_in_schema=False)
 def photo_file(photo_id: int, session: Session = SessionDep):
     item = session.get(FamilyPhoto, photo_id)
-    path = db.PHOTOS_DIR / item.filename if item else None
-    if not path or not path.is_file():
+    try:
+        data = storage.photos().read(item.filename) if item else None
+    except storage.StorageError as e:
+        raise HTTPException(502, str(e)) from e
+    if data is None:
         raise HTTPException(404, "Foto no encontrada")
-    return FileResponse(path, headers={"Cache-Control": "private, max-age=31536000, immutable"})
+    ext = item.filename.rsplit(".", 1)[-1].lower()
+    media = {"png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg")
+    return Response(data, media_type=media, headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
 
 @app.delete("/api/photos/{photo_id}", status_code=204)
@@ -890,7 +897,10 @@ def delete_photo(photo_id: int, session: Session = SessionDep):
     item = session.get(FamilyPhoto, photo_id)
     if not item:
         return
-    (db.PHOTOS_DIR / item.filename).unlink(missing_ok=True)
+    try:
+        storage.photos().delete(item.filename)
+    except storage.StorageError as e:
+        raise HTTPException(502, str(e)) from e
     session.delete(item)
     session.commit()
 

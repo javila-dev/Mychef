@@ -1,4 +1,5 @@
 import datetime as dt
+import pytest
 
 from sqlalchemy import create_engine as sa_create_engine
 from sqlalchemy import inspect, text
@@ -284,3 +285,27 @@ def test_ai_providers_map_errors(monkeypatch):
         assert e.status == 400 and "gpt-inexistente" in str(e)
     else:
         raise AssertionError("debía fallar")
+
+
+def test_family_photos_in_minio(client, monkeypatch):
+    """Las fotos van a un bucket S3 (MinIO); se prueba contra un servidor S3 de mentiras (moto)."""
+    moto_server = pytest.importorskip("moto.server")
+    from app import storage
+
+    server = moto_server.ThreadedMotoServer(ip_address="127.0.0.1", port=5055)
+    server.start()
+    try:
+        s3 = storage.S3Storage("http://127.0.0.1:5055", "llave", "secreto", "mychef-fotos")
+        storage.use(s3)
+        res = client.post("/api/photos", files={"photo": ("fam.png", PNG_1PX, "image/png")})
+        assert res.status_code == 201
+        photo = res.json()
+        assert len(s3.names()) == 1  # quedó en el bucket (creado solo)
+        got = client.get(photo["url"])
+        assert got.status_code == 200 and got.content == PNG_1PX and got.headers["content-type"] == "image/png"
+        assert client.delete(f"/api/photos/{photo['id']}").status_code == 204
+        assert s3.names() == []
+        assert client.get(photo["url"]).status_code == 404
+    finally:
+        storage.use(None)
+        server.stop()
