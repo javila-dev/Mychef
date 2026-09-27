@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 from sqlmodel import Session, select
 
-from . import household, services
+from . import clock, household, services
 from .models import Chore, Ingredient, Member, PantryItem, Recipe, ShoppingExtra
 from .units import strip_accents
 
@@ -161,7 +161,7 @@ def _list(items: list[str]) -> str:
 
 def interpret(session: Session, text: str, context: dict | None = None, today: dt.date | None = None) -> VoiceResult:
     context = context or {}
-    today = today or dt.date.today()
+    today = today or clock.today()
     o = soft(text)
     t = strip_accents(o)
     if not t:

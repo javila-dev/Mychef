@@ -19,6 +19,13 @@ pocas palabras, siempre un **← Volver**, y si nadie la toca por 2 minutos vuel
   y **Terminé de cocinar** descuenta lo usado de la nevera.
 - **Tareas de hoy**: sacar la basura, lavar la loza, regar las plantas… Se toca ✓, se elige
   **¿quién lo hizo?** y listo. Tocar de nuevo deshace. Las tareas por turnos pasan solas a la siguiente persona.
+  Cada tarea tiene su horario de calendario: **días de la semana** («los lunes y jueves», cuando pasa el
+  camión), **cada ciertos días** o **un día del mes** («el 1 de cada mes»; si el mes es más corto, el último día).
+  Si nadie la hace, sigue apareciendo como atrasada hasta que se marque.
+- **Recordatorio en voz alta**: a la hora que se le ponga a una tarea (p. ej. 7:30 p. m.), si nadie la ha
+  hecho, la tablet suena y dice «Recordatorio: sacar la basura. Hoy le toca a Papá.». Se responde
+  **Ya la hicimos**, **En 30 minutos** o **Hoy no**. Solo avisa la pantalla de la casa (no el celular), y si
+  estuvo apagada no avisa más de 4 horas tarde.
 - **Ojo con esto**: lo que se vence pronto y lo que se está acabando.
 - **🧾 Escanear → La factura**: foto de la factura del mercado (si es larga, en varias fotos). La IA entiende
   los nombres abreviados ("LCHE ALQ 1100ML X2" → Leche, 2200 ml), separa comida de aseo, y se revisa con
@@ -65,7 +72,7 @@ modos, solo pide algo cuando falta más de una cuarta parte.
 | **Recetas** | Sus recetas con cantidades exactas, escalables a N porciones. **📷 Importar receta escrita** convierte la foto del cuaderno en receta. |
 | **Despensa** | Inventario con vencimientos, **mínimo** (si baja de ahí pasa sola a la lista) y equivalencias ⚖ ("1 taza de arroz = 200 g"). |
 | **Compras** | La lista completa de la semana, para copiar o pasar a la despensa. |
-| **Casa y tareas** | Personas de la casa, tareas (cada cuántos días, persona fija, cualquiera o por turnos), cuántas tareas hizo cada uno y **gastos del mes** según las facturas. |
+| **Casa y tareas** | Personas de la casa, tareas (días de la semana, cada N días o un día del mes; persona fija, cualquiera o por turnos; hora del recordatorio en voz alta), cuántas tareas hizo cada uno y **gastos del mes** según las facturas. |
 
 ## Cómo correrla
 
@@ -92,6 +99,9 @@ python -m app.seed
 ```bash
 docker compose up -d
 ```
+
+**Zona horaria**: la app usa la hora de Colombia (`America/Bogota`) para saber qué día es, aunque el
+computador o el servidor estén en otra hora. Para cambiarla: `MYCHEF_TZ=America/Mexico_City` (o la que sea).
 
 Los datos quedan en `./data/mychef.db` (un archivo SQLite; para respaldar basta copiarlo).
 
@@ -220,6 +230,7 @@ app/
   models.py    Tablas: ingredientes, despensa, recetas, menú, personas, tareas, compras
   household.py Tareas del hogar, facturas, mínimos de inventario y el resumen de "Hoy"
   auth.py      PIN opcional de la casa
+  clock.py     La hora y el día de la casa (MYCHEF_TZ)
   services.py  Escalar recetas, disponibilidad, sugerencias, plan semanal, compras
   units.py     Unidades y conversiones
   vision.py    Reconocimiento con Claude (facturas, despensa, recetas y frases de voz difíciles)

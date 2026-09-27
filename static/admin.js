@@ -700,6 +700,57 @@ async function renderShopping() {
 
 // ------------------------------------------------------------------ casa: personas, tareas, gastos
 
+// ---------------------------------------------------------------- horario de una tarea
+
+const DAY_SHORT = ["L", "M", "X", "J", "V", "S", "D"];
+const DAY_NAMES = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+const EVERY_OPTS = [[1, "Todos los días"], [2, "Cada 2 días"], [3, "Cada 3 días"], [7, "Cada semana"], [14, "Cada 15 días"], [30, "Cada mes"]];
+
+function scheduleOf(c) {
+  return {
+    schedule: c.schedule ?? "every", every_days: c.every_days ?? 7, weekdays: c.weekdays ?? [],
+    month_day: c.month_day ?? null, remind_at: c.remind_at ?? null,
+  };
+}
+
+function scheduleFields(c) {
+  const s = scheduleOf(c);
+  const kinds = [["weekdays", "Días de la semana"], ["every", "Cada ciertos días"], ["monthday", "Un día del mes"]];
+  const everyOpts = EVERY_OPTS.some(([v]) => v === s.every_days) ? EVERY_OPTS : [...EVERY_OPTS, [s.every_days, `Cada ${s.every_days} días`]];
+  return `
+    <div class="field">¿Cuándo toca?
+      <div class="seg">${kinds.map(([k, t]) => `<label><input type="radio" name="schedule" value="${k}" ${k === s.schedule ? "checked" : ""}><span>${t}</span></label>`).join("")}</div>
+    </div>
+    <div data-sch="weekdays" class="field">¿Qué días?
+      <div class="days">${DAY_SHORT.map((d, i) => `<label title="${DAY_NAMES[i]}"><input type="checkbox" name="wd" value="${i}" ${s.weekdays.includes(i) ? "checked" : ""}><span>${d}</span></label>`).join("")}</div>
+    </div>
+    <label data-sch="every" class="field">¿Cada cuánto?<select name="every_days">
+      ${everyOpts.map(([v, t]) => `<option value="${v}" ${v === s.every_days ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+    <label data-sch="monthday" class="field">¿Qué día del mes?<input name="month_day" type="number" min="1" max="31" value="${s.month_day ?? ""}" placeholder="Ej: 1, 15, 30"></label>
+    <label class="field">Recordar en voz alta a las
+      <input name="remind_at" type="time" value="${s.remind_at ?? ""}">
+      <small class="muted">La tablet lo dice en voz alta ese día a esa hora, si nadie la ha hecho. Vacío = sin recordatorio.</small></label>`;
+}
+
+function bindSchedule(form) {
+  const sync = () => {
+    const kind = form.querySelector("[name=schedule]:checked")?.value ?? "every";
+    $$("[data-sch]", form).forEach((el) => { el.hidden = el.dataset.sch !== kind; });
+  };
+  $$("[name=schedule]", form).forEach((r) => r.onchange = sync);
+  sync();
+}
+
+function readSchedule(form) {
+  return {
+    schedule: form.querySelector("[name=schedule]:checked")?.value ?? "every",
+    every_days: +form.every_days.value || 7,
+    weekdays: $$("[name=wd]:checked", form).map((i) => +i.value),
+    month_day: form.month_day.value ? +form.month_day.value : null,
+    remind_at: form.remind_at.value || null,
+  };
+}
+
 async function renderHouse() {
   const [members, chores, stats, spend] = await Promise.all([
     api("/api/members"), api("/api/chores"), api("/api/chores/stats"), api("/api/purchases"),
@@ -708,7 +759,6 @@ async function renderHouse() {
     <option value="">Cualquiera</option>
     <option value="rotate" ${rotate ? "selected" : ""}>Por turnos</option>
     ${members.map((m) => `<option value="${m.id}" ${m.id === sel ? "selected" : ""}>${esc(m.name)}</option>`).join("")}`;
-  const every = (d) => d === 1 ? "todos los días" : d === 7 ? "cada semana" : d === 14 ? "cada 15 días" : d === 30 ? "cada mes" : `cada ${d} días`;
 
   view.innerHTML = `
     <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(320px,1fr))">
@@ -751,15 +801,15 @@ async function renderHouse() {
     </div>
     <section class="card stack" style="margin-top:.75rem">
       <h2>Tareas del hogar</h2>
-      <table><thead><tr><th></th><th>Tarea</th><th>Frecuencia (días)</th><th>¿A quién le toca?</th><th>Próxima</th><th></th></tr></thead>
+      <table><thead><tr><th></th><th>Tarea</th><th>¿Cuándo?</th><th>¿A quién le toca?</th><th>Próxima</th><th></th></tr></thead>
         <tbody>${chores.map((c) => `
           <tr data-id="${c.id}">
             <td><span class="row" style="flex-wrap:nowrap;color:var(--green-ink)">${choreIcon(c.emoji, 24)}
               <select data-f="emoji" aria-label="Dibujo">${META.chore_emojis.map((e) => `<option value="${e}" ${e === c.emoji ? "selected" : ""}>${CHORE_ICONS[e]?.[1] ?? e}</option>`).join("")}</select></span></td>
             <td><input data-f="name" value="${esc(c.name)}"></td>
-            <td><input data-f="every_days" type="number" min="1" value="${c.every_days}" style="width:5rem" title="${every(c.every_days)}"></td>
+            <td><button class="when-btn" data-when="${c.id}">${icon("calendar", 18)} ${esc(c.when)}${c.remind_at ? `<span class="remind">${icon("speaker", 16)} ${c.remind_at}</span>` : ""}</button></td>
             <td><select data-f="who">${memberOpts(c.member_id, c.rotate)}</select></td>
-            <td class="small">${c.is_due ? `<span class="badge warn">hoy${c.days_late ? ` (+${c.days_late})` : ""}</span>` : new Date(c.due_on + "T12:00").toLocaleDateString("es")}</td>
+            <td class="small">${c.is_due ? `<span class="badge warn">${c.days_late ? `atrasada ${c.days_late} día${c.days_late > 1 ? "s" : ""}` : "hoy"}</span>` : esc(cap(c.due_text))}</td>
             <td><button class="ghost danger" data-del-c="${c.id}" title="Quitar">${icon("close", 18)}</button></td>
           </tr>`).join("")}</tbody></table>
       <div><button class="primary" id="add-c">${icon("plus", 20)} Agregar tarea</button></div>
@@ -843,19 +893,17 @@ async function renderHouse() {
         <label class="field">¿Qué hay que hacer?<input name="name" required maxlength="80" autocomplete="off" placeholder="Ej: Sacar la basura"></label>
         <div class="field">Dibujo${pickGrid("emoji", META.chore_emojis, META.chore_emojis[0], (e) => choreIcon(e, 26))}</div>
         <div class="form-grid">
-          <label class="field">¿Cada cuánto?<select name="every_days">
-            ${[[1, "Todos los días"], [2, "Cada 2 días"], [3, "Cada 3 días"], [7, "Cada semana"], [14, "Cada 15 días"], [30, "Cada mes"]]
-              .map(([v, t]) => `<option value="${v}" ${v === 7 ? "selected" : ""}>${t}</option>`).join("")}
-          </select></label>
           <label class="field">¿A quién le toca?<select name="who">${memberOpts(null, false)}</select></label>
-        </div></form>`,
+        </div>
+        ${scheduleFields({})}</form>`,
+      onOpen: (dlg) => bindSchedule($("#cf", dlg)),
       actions: [
         { label: "Cancelar", value: false },
         { label: "Agregar tarea", tone: "primary", icon: "plus", onClick: async (dlg) => {
           const f = $("#cf", dlg);
           if (!f.reportValidity()) return false;
           const ok = await safe(() => api("/api/chores", { method: "POST", json: {
-            name: f.name.value, emoji: f.emoji.value, every_days: +f.every_days.value || 7, ...whoFields(f.who.value),
+            name: f.name.value, emoji: f.emoji.value, ...whoFields(f.who.value), ...readSchedule(f),
           } }));
           if (!ok) return false;
           renderHouse();
@@ -866,12 +914,32 @@ async function renderHouse() {
   $$("tr[data-id] [data-f]", view).forEach((el) => el.onchange = () => safe(async () => {
     const tr = el.closest("tr");
     const get = (f) => $(`[data-f=${f}]`, tr).value;
+    const c = chores.find((x) => x.id === +tr.dataset.id);
     await api(`/api/chores/${tr.dataset.id}`, { method: "PUT", json: {
-      name: get("name"), emoji: get("emoji"), every_days: +get("every_days") || 7, ...whoFields(get("who")),
+      ...scheduleOf(c), name: get("name"), emoji: get("emoji"), ...whoFields(get("who")),
     } });
     toast("Tarea actualizada");
     renderHouse();
   }));
+  $$("[data-when]", view).forEach((b) => b.onclick = () => {
+    const c = chores.find((x) => x.id === +b.dataset.when);
+    formModal({
+      title: esc(c.name),
+      body: `<form id="sf" class="stack">${scheduleFields(c)}</form>`,
+      onOpen: (dlg) => bindSchedule($("#sf", dlg)),
+      actions: [
+        { label: "Cancelar", value: false },
+        { label: "Guardar", tone: "primary", icon: "check", onClick: async (dlg) => {
+          const ok = await safe(() => api(`/api/chores/${c.id}`, { method: "PUT", json: {
+            name: c.name, emoji: c.emoji, member_id: c.member_id, rotate: c.rotate, ...readSchedule($("#sf", dlg)),
+          } }));
+          if (!ok) return false;
+          toast("Horario guardado");
+          renderHouse();
+        } },
+      ],
+    });
+  });
   $$("[data-del-c]", view).forEach((b) => b.onclick = () => safe(async () => {
     if (!await confirmModal({ title: "¿Quitar esta tarea?", text: "Se borra junto con su historial.", ok: "Quitar", tone: "danger", okIcon: "trash" })) return;
     await api(`/api/chores/${b.dataset.delC}`, { method: "DELETE" });

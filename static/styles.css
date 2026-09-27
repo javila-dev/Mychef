@@ -298,3 +298,17 @@ dialog::backdrop { background: rgba(22, 32, 24, .45); animation: fade-in .22s va
 .mode:focus-within { outline: 2px solid var(--green); outline-offset: 2px; }
 .badge.staple { display: inline-flex; align-items: center; gap: .15rem; padding-right: .15rem; }
 .badge.staple button { width: 24px; height: 24px; min-height: 0; padding: 0 !important; border: 0; color: inherit; }
+
+/* Horario de tareas (Administrar → Casa y tareas) */
+.seg { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .35rem; }
+.seg label, .days label { position: relative; cursor: pointer; }
+.seg input, .days input { position: absolute; opacity: 0; pointer-events: none; }
+.seg span { display: inline-block; padding: .55rem 1rem; border-radius: 999px; border: 2px solid var(--line); background: var(--paper); font-weight: 500; }
+.seg input:checked + span { border-color: var(--green); background: var(--green-mist); color: var(--green-ink); }
+.days { display: flex; gap: .4rem; margin-top: .35rem; flex-wrap: wrap; }
+.days span { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; border: 2px solid var(--line); font-weight: 600; background: var(--paper); }
+.days input:checked + span { background: var(--green); border-color: var(--green); color: var(--on-green); }
+.seg input:focus-visible + span, .days input:focus-visible + span { outline: 2px solid var(--green); outline-offset: 2px; }
+.when-btn { display: inline-flex; align-items: center; gap: .4rem; flex-wrap: wrap; text-align: left; }
+.when-btn .remind { display: inline-flex; align-items: center; gap: .2rem; color: var(--muted); font-size: .9em; }
+[data-sch][hidden] { display: none !important; }

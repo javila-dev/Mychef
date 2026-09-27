@@ -9,7 +9,7 @@ import datetime as dt
 
 from sqlmodel import Session, select
 
-from . import services
+from . import clock, services
 from .db import engine, init_db
 from .models import Chore, Member, PantryItem, Recipe
 
@@ -91,12 +91,13 @@ EQUIVALENCES = {
 
 MEMBERS = [("Mamá", "👩"), ("Papá", "👨"), ("Sofi", "👧")]
 CHORES = [
-    # (tarea, emoji, cada cuántos días, persona fija o None, por turnos)
-    ("Sacar la basura", "🗑️", 2, None, True),
-    ("Lavar la loza", "🍽️", 1, None, True),
-    ("Regar las plantas", "🪴", 3, "Sofi", False),
-    ("Cambiar las sábanas", "🛏️", 7, "Papá", False),
-    ("Limpiar la nevera", "🧽", 14, None, False),
+    # (tarea, emoji, horario, persona fija o None, por turnos, recordar a las)
+    # horario: número = cada N días; lista = días de la semana (0 = lunes); "mes:N" = día N del mes
+    ("Sacar la basura", "🗑️", [0, 3], None, True, "19:30"),
+    ("Lavar la loza", "🍽️", 1, None, True, None),
+    ("Regar las plantas", "🪴", [2, 5], "Sofi", False, "17:00"),
+    ("Cambiar las sábanas", "🛏️", [5], "Papá", False, None),
+    ("Limpiar la nevera", "🧽", "mes:1", None, False, None),
 ]
 MINIMUMS = {"Huevo": 12, "Arroz": 1, "Leche": 2}
 
@@ -109,7 +110,7 @@ class _Line:
 
 def main() -> None:
     init_db()
-    today = dt.date.today()
+    today = clock.today()
     with Session(engine) as session:
         if session.exec(select(Recipe)).first():
             print("Ya hay recetas; no se cargan ejemplos.")
@@ -134,9 +135,16 @@ def main() -> None:
             people[name] = Member(name=name, emoji=emoji)
             session.add(people[name])
         session.flush()
-        for name, emoji, every, who, rotate in CHORES:
-            session.add(Chore(name=name, emoji=emoji, every_days=every,
-                              member_id=people[who].id if who else None, rotate=rotate))
+        for name, emoji, when, who, rotate, remind in CHORES:
+            chore = Chore(name=name, emoji=emoji, member_id=people[who].id if who else None,
+                          rotate=rotate, remind_at=remind)
+            if isinstance(when, list):
+                chore.schedule, chore.weekdays = "weekdays", ",".join(map(str, when))
+            elif isinstance(when, str):
+                chore.schedule, chore.month_day = "monthday", int(when.split(":")[1])
+            else:
+                chore.every_days = when
+            session.add(chore)
         for name, (per_cup, per_unit) in EQUIVALENCES.items():
             ing = services.get_or_create_ingredient(session, name)
             ing.g_per_ml = per_cup / 240 if per_cup else None

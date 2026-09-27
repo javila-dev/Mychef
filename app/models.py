@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from sqlmodel import Field, Relationship, SQLModel
 
+from . import clock
 from .units import convert_with, strip_accents
 
 MEAL_TYPES = ["desayuno", "almuerzo", "cena", "merienda"]
@@ -128,7 +129,7 @@ class MenuEntry(SQLModel, table=True):
 class CookLog(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     recipe_id: int = Field(foreign_key="recipe.id", index=True)
-    day: dt.date = Field(default_factory=dt.date.today)
+    day: dt.date = Field(default_factory=clock.today)
     servings: int
 
 
@@ -152,19 +153,26 @@ class Chore(SQLModel, table=True):
     name: str
     emoji: str = "🧹"
     every_days: int = 7
+    # Cuándo toca: "every" = cada every_days días; "weekdays" = ciertos días de la semana
+    # (weekdays = "0,3" → lunes y jueves; 0 = lunes … 6 = domingo); "monthday" = un día del mes.
+    schedule: str = "every"
+    weekdays: str = ""
+    month_day: Optional[int] = None
+    # Recordatorio en voz alta en la tablet, "HH:MM" (hora de la casa)
+    remind_at: Optional[str] = None
     # Persona fija, o None = le toca a cualquiera / por turnos si rotate
     member_id: Optional[int] = Field(default=None, foreign_key="member.id")
     rotate: bool = False
     last_done: Optional[dt.date] = None
     last_done_by: Optional[int] = Field(default=None, foreign_key="member.id")
-    created_on: dt.date = Field(default_factory=dt.date.today)
+    created_on: dt.date = Field(default_factory=clock.today)
 
 
 class ChoreLog(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     chore_id: int = Field(foreign_key="chore.id", index=True)
     member_id: Optional[int] = Field(default=None, foreign_key="member.id")
-    day: dt.date = Field(default_factory=dt.date.today)
+    day: dt.date = Field(default_factory=clock.today)
 
 
 class Purchase(SQLModel, table=True):
@@ -172,7 +180,7 @@ class Purchase(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     store: str = ""
-    day: dt.date = Field(default_factory=dt.date.today)
+    day: dt.date = Field(default_factory=clock.today)
     total: Optional[float] = None
     created_at: dt.datetime = Field(default_factory=utcnow)
 

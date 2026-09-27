@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from sqlmodel import Session, select
 
+from . import clock
 from .models import (
     CookLog,
     Ingredient,
@@ -221,7 +222,7 @@ def suggest(
     limit: int = 10,
 ) -> list[dict]:
     """Ordena las recetas de la casa según lo que hay, lo que vence pronto y la variedad."""
-    today = today or dt.date.today()
+    today = today or clock.today()
     pantry = pantry if pantry is not None else load_pantry(session)
     servings = servings or household_size(session)
     avoid = avoid or {}  # receta -> veces ya planeada en el periodo
@@ -283,7 +284,7 @@ def cook(session: Session, recipe: Recipe, servings: int, day: dt.date | None = 
             item.quantity = new_qty
             item.updated_at = utcnow()
             session.add(item)
-    session.add(CookLog(recipe_id=recipe.id, servings=servings, day=day or dt.date.today()))
+    session.add(CookLog(recipe_id=recipe.id, servings=servings, day=day or clock.today()))
     session.flush()
     return changes
 

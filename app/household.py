@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import calendar
 import datetime as dt
 
 from sqlmodel import Session, select
 
-from . import services
+from . import clock, services
 from .models import (
     Chore,
     ChoreLog,
@@ -39,10 +40,78 @@ def next_member(chore: Chore, members: list[Member]) -> Member | None:
     return members[0]
 
 
+WEEKDAYS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+
+
+def chore_weekdays(chore: Chore) -> list[int]:
+    return sorted({int(d) for d in (chore.weekdays or "").split(",") if d.strip().isdigit() and int(d) < 7})
+
+
+def _month_day_on_or_after(start: dt.date, day: int) -> dt.date:
+    """El día `day` del mes (o el último, si el mes es más corto) en o después de `start`."""
+    year, month = start.year, start.month
+    for _ in range(3):
+        last = calendar.monthrange(year, month)[1]
+        candidate = dt.date(year, month, min(day, last))
+        if candidate >= start:
+            return candidate
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+    return start
+
+
 def due_date(chore: Chore) -> dt.date:
+    """Cuándo vuelve a tocar: el primer día que cumple el horario después de la última vez."""
+    if chore.schedule == "weekdays" and chore_weekdays(chore):
+        days = set(chore_weekdays(chore))
+        d = chore.last_done + dt.timedelta(days=1) if chore.last_done else chore.created_on
+        while d.weekday() not in days:
+            d += dt.timedelta(days=1)
+        return d
+    if chore.schedule == "monthday" and chore.month_day:
+        start = chore.last_done + dt.timedelta(days=1) if chore.last_done else chore.created_on
+        return _month_day_on_or_after(start, chore.month_day)
     if chore.last_done is None:
         return chore.created_on
     return chore.last_done + dt.timedelta(days=max(chore.every_days, 1))
+
+
+def _join(words: list[str]) -> str:
+    return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " y " + words[-1]
+
+
+def when_text(chore: Chore) -> str:
+    """El horario en palabras: «Lunes y jueves», «El 1 de cada mes», «Cada semana»."""
+    if chore.schedule == "weekdays" and chore_weekdays(chore):
+        days = chore_weekdays(chore)
+        if days == list(range(7)):
+            return "Todos los días"
+        if days == list(range(5)):
+            return "De lunes a viernes"
+        if days == [5, 6]:
+            return "Los fines de semana"
+        return "Los " + _join([WEEKDAYS[d] + ("" if WEEKDAYS[d].endswith("s") else "s") for d in days])
+    if chore.schedule == "monthday" and chore.month_day:
+        return f"El {chore.month_day} de cada mes"
+    n = chore.every_days
+    return {1: "Todos los días", 7: "Cada semana", 14: "Cada 15 días", 30: "Cada mes"}.get(n, f"Cada {n} días")
+
+
+def due_text(due: dt.date, today: dt.date) -> str:
+    """Cuándo toca, como lo diría alguien de la casa: hoy, mañana, el jueves, el 5 de octubre."""
+    diff = (due - today).days
+    if diff < 0:
+        return f"hace {-diff} día{'s' if diff < -1 else ''}"
+    if diff == 0:
+        return "hoy"
+    if diff == 1:
+        return "mañana"
+    if diff < 7:
+        return f"el {WEEKDAYS[due.weekday()]}"
+    return f"el {due.day} de {MONTHS[due.month - 1]}"
+
+
+MONTHS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
+          "septiembre", "octubre", "noviembre", "diciembre"]
 
 
 def chore_out(chore: Chore, members: list[Member], today: dt.date) -> dict:
@@ -54,6 +123,12 @@ def chore_out(chore: Chore, members: list[Member], today: dt.date) -> dict:
         "name": chore.name,
         "emoji": chore.emoji,
         "every_days": chore.every_days,
+        "schedule": chore.schedule,
+        "weekdays": chore_weekdays(chore),
+        "month_day": chore.month_day,
+        "remind_at": chore.remind_at,
+        "when": when_text(chore),
+        "due_text": due_text(due, today),
         "member_id": chore.member_id,
         "rotate": chore.rotate,
         "due_on": due.isoformat(),
@@ -67,17 +142,31 @@ def chore_out(chore: Chore, members: list[Member], today: dt.date) -> dict:
 
 
 def list_chores(session: Session, today: dt.date | None = None) -> list[dict]:
-    today = today or dt.date.today()
+    today = today or clock.today()
     members = list(members_by_id(session).values())
     out = [chore_out(c, members, today) for c in session.exec(select(Chore))]
     out.sort(key=lambda c: (not c["is_due"], c["due_on"], c["name"]))
     return out
 
 
+def reminders(session: Session, today: dt.date | None = None) -> list[dict]:
+    """Tareas de hoy con recordatorio en voz alta, que todavía nadie ha hecho."""
+    today = today or clock.today()
+    out = []
+    for c in list_chores(session, today):
+        if not c["remind_at"] or not c["is_due"] or c["done_today"]:
+            continue
+        task = c["name"][:1].lower() + c["name"][1:]
+        who = f" Hoy le toca a {c['turn']['name']}." if c["turn"] else ""
+        late = f" Lleva {c['days_late']} día{'s' if c['days_late'] > 1 else ''} atrasada." if c["days_late"] else ""
+        out.append({**c, "say": f"Recordatorio: {task}.{who}{late}"})
+    return out
+
+
 def complete_chore(
     session: Session, chore: Chore, member_id: int | None, today: dt.date | None = None
 ) -> None:
-    today = today or dt.date.today()
+    today = today or clock.today()
     chore.last_done = today
     chore.last_done_by = member_id
     session.add(chore)
@@ -87,7 +176,7 @@ def complete_chore(
 
 def chore_stats(session: Session, days: int = 30, today: dt.date | None = None) -> list[dict]:
     """Cuántas tareas hizo cada persona en los últimos días (para repartir mejor)."""
-    today = today or dt.date.today()
+    today = today or clock.today()
     since = today - dt.timedelta(days=days)
     counts: dict[int | None, int] = {}
     for log in session.exec(select(ChoreLog).where(ChoreLog.day >= since)):
@@ -161,7 +250,7 @@ def save_purchase(
     lines: list,
 ) -> tuple[Purchase, list[PantryItem]]:
     """Guarda la compra y suma cada producto al inventario."""
-    purchase = Purchase(store=store or "", day=day or dt.date.today(), total=total)
+    purchase = Purchase(store=store or "", day=day or clock.today(), total=total)
     session.add(purchase)
     session.flush()
     added = []
@@ -194,7 +283,7 @@ def _clear_extras_for(session: Session, name: str) -> None:
 
 
 def spending(session: Session, today: dt.date | None = None) -> dict:
-    today = today or dt.date.today()
+    today = today or clock.today()
     month_start = today.replace(day=1)
     purchases = session.exec(select(Purchase).order_by(Purchase.day.desc())).all()
     month = [p for p in purchases if p.day >= month_start]
@@ -213,7 +302,7 @@ def spending(session: Session, today: dt.date | None = None) -> dict:
 
 
 def today_summary(session: Session, today: dt.date | None = None) -> dict:
-    today = today or dt.date.today()
+    today = today or clock.today()
     menu = session.exec(select(MenuEntry).where(MenuEntry.day == today)).all()
     pantry = services.load_pantry(session)
     meals = []

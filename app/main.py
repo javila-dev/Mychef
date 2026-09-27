@@ -17,7 +17,7 @@ import segno
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from . import household, services, vision, voice
+from . import clock, household, services, vision, voice
 from .auth import AuthMiddleware, check_pin, pin_enabled
 from . import db
 from .db import get_session, init_db
@@ -107,6 +107,20 @@ class ChoreIn(BaseModel):
     every_days: int = Field(7, ge=1, le=365)
     member_id: int | None = None
     rotate: bool = False
+    schedule: Literal["every", "weekdays", "monthday"] = "every"
+    weekdays: list[int] = Field(default_factory=list)  # 0 = lunes … 6 = domingo
+    month_day: int | None = Field(None, ge=1, le=31)
+    remind_at: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+
+    def to_fields(self) -> dict:
+        data = self.model_dump()
+        days = sorted({d for d in self.weekdays if 0 <= d <= 6})
+        if self.schedule == "weekdays" and not days:
+            raise HTTPException(422, "Elijan al menos un día de la semana.")
+        if self.schedule == "monthday" and not self.month_day:
+            raise HTTPException(422, "Digan qué día del mes.")
+        data["weekdays"] = ",".join(map(str, days))
+        return data
 
 
 class ChoreDone(BaseModel):
@@ -198,7 +212,7 @@ def _get_recipe(session: Session, recipe_id: int) -> Recipe:
 
 
 def _pantry_out(item: PantryItem, today: dt.date | None = None) -> dict:
-    today = today or dt.date.today()
+    today = today or clock.today()
     days_left = (item.expires_on - today).days if item.expires_on else None
     return {
         "id": item.id,
@@ -913,7 +927,7 @@ def chores_stats(days: int = 30, session: Session = SessionDep):
 @app.post("/api/chores", status_code=201)
 def add_chore(data: ChoreIn, session: Session = SessionDep):
     _check_member(session, data.member_id)
-    chore = Chore(**data.model_dump())
+    chore = Chore(**data.to_fields())
     session.add(chore)
     session.commit()
     session.refresh(chore)
@@ -924,11 +938,18 @@ def add_chore(data: ChoreIn, session: Session = SessionDep):
 def update_chore(chore_id: int, data: ChoreIn, session: Session = SessionDep):
     chore = _get_chore(session, chore_id)
     _check_member(session, data.member_id)
-    for k, v in data.model_dump().items():
+    for k, v in data.to_fields().items():
         setattr(chore, k, v)
     session.commit()
     session.refresh(chore)
     return chore
+
+
+@app.get("/api/reminders")
+def chore_reminders(session: Session = SessionDep):
+    """Lo que la tablet debe recordar en voz alta hoy, con la hora de la casa."""
+    now = clock.now()
+    return {"now": now.strftime("%H:%M"), "today": now.date().isoformat(), "items": household.reminders(session)}
 
 
 @app.delete("/api/chores/{chore_id}", status_code=204)

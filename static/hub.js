@@ -314,16 +314,16 @@ async function photosModal() {
 
 // ---------------------------------------------------------------- tareas
 
-function choreRow(c) {
+function choreRow(c, full = false) {
   const who = c.done_today
     ? `Hecho${c.last_done_by ? ` por ${avatar(c.last_done_by, 26)} ${esc(c.last_done_by.name)}` : ""}`
     : c.turn ? `Le toca a ${avatar(c.turn, 26)} ${esc(c.turn.name)}` : "Cualquiera puede";
   const late = !c.done_today && c.days_late ? ` · <span class="late">atrasada ${c.days_late} día${c.days_late > 1 ? "s" : ""}</span>` : "";
-  const next = !c.is_due && !c.done_today
-    ? ` · ${new Date(c.due_on + "T12:00").toLocaleDateString("es", { weekday: "long", day: "numeric" })}` : "";
+  const next = !c.is_due && !c.done_today ? ` · toca ${esc(c.due_text)}` : "";
+  const when = full ? `<small class="when">${icon("calendar", 16)} ${esc(c.when)}${c.remind_at ? ` · ${icon("speaker", 16)} lo recuerda a las ${esc(fmtHour(c.remind_at))}` : ""}</small>` : "";
   return `<div class="chore ${c.done_today ? "done" : ""}">
     <span class="emo">${choreIcon(c.emoji, 30)}</span>
-    <span class="txt"><strong>${esc(c.name)}</strong><span>${who}${late}${next}</span></span>
+    <span class="txt"><strong>${esc(c.name)}</strong><span>${who}${late}${next}</span>${when}</span>
     <button class="tick-round" data-chore="${c.id}" aria-label="${c.done_today ? "Deshacer" : "Marcar como hecha"}">${icon("check", 30)}</button>
   </div>`;
 }
@@ -367,6 +367,71 @@ function whoModal(chore, members, after) {
   });
 }
 
+// «19:30» → «7:30 p. m.»
+function fmtHour(hhmm) {
+  const [h, m] = hhmm.split(":").map(Number);
+  return new Date(2000, 0, 1, h, m).toLocaleTimeString("es-CO", { hour: "numeric", minute: "2-digit" });
+}
+
+// ---------------------------------------------------------------- recordatorios en voz alta
+// Cada minuto la tablet pregunta al servidor qué tareas de hoy tienen recordatorio y nadie ha hecho.
+// Se usa la hora de la casa que da el servidor. Lo ya avisado se guarda en este aparato por día.
+
+const REMIND_KEY = "mychef-reminded";
+const REMIND_WINDOW = 4 * 60; // si la tablet estuvo apagada, no avisar horas después
+let reminding = false;
+
+const toMinutes = (hhmm) => { const [h, m] = hhmm.split(":").map(Number); return h * 60 + m; };
+function remindState(today) {
+  try {
+    const st = JSON.parse(localStorage.getItem(REMIND_KEY) || "{}");
+    if (st.today === today) return st;
+  } catch { /* sin almacenamiento */ }
+  return { today, seen: {} };
+}
+function saveRemind(st) { try { localStorage.setItem(REMIND_KEY, JSON.stringify(st)); } catch { /* sin almacenamiento */ } }
+
+async function checkReminders() {
+  if (reminding || isPhone() || document.hidden || document.querySelector("dialog[open]")) return;
+  let data;
+  try { data = await api("/api/reminders"); } catch { return; }
+  const st = remindState(data.today);
+  const now = toMinutes(data.now);
+  const r = data.items.find((i) => {
+    const at = toMinutes(i.remind_at), until = st.seen[i.id];
+    return now >= at && now - at <= REMIND_WINDOW && until !== "off" && (until == null || now >= until);
+  });
+  if (r) remindModal(r, st, now);
+}
+
+function remindModal(r, st, now) {
+  reminding = true;
+  chime();
+  setTimeout(() => say(r.say), 700);
+  const m = modal({
+    title: "Recordatorio", size: "narrow",
+    body: `<div class="done-msg"><div class="mark">${choreIcon(r.emoji, 44)}</div>
+      <h2>${esc(r.name)}</h2>
+      <p class="muted">${r.turn ? `Hoy le toca a ${avatar(r.turn, 26)} ${esc(r.turn.name)}` : "Cualquiera puede hacerla"}${r.days_late ? ` · atrasada ${r.days_late} día${r.days_late > 1 ? "s" : ""}` : ""}</p></div>`,
+    actions: [
+      { label: "Ya la hicimos", tone: "primary", icon: "check", value: "done" },
+      { label: "En 30 minutos", icon: "clock", value: "later" },
+      { label: "Hoy no", value: "off" },
+    ],
+  });
+  m.done.then(async (v) => {
+    reminding = false;
+    stopSpeaking();
+    // Cerrar con la X cuenta como «más tarde»: se vuelve a recordar en media hora.
+    st.seen[r.id] = v === "done" || v === "off" ? "off" : now + 30;
+    saveRemind(st);
+    if (v === "done") {
+      const members = await safe(() => api("/api/members"));
+      if (members) whoModal(r, members, refresh);
+    }
+  });
+}
+
 async function finishChore(chore, memberId, after) {
   await safe(async () => {
     await api(`/api/chores/${chore.id}/done`, { method: "POST", json: { member_id: memberId } });
@@ -380,7 +445,7 @@ async function renderChores() {
   const chores = await api("/api/chores");
   TODAY = TODAY ?? await api("/api/today");
   app.innerHTML = `${head("Tareas de la casa")}
-    <section class="sheet chores-sheet">${chores.map(choreRow).join("") || `<p class="empty-note">Aún no hay tareas.</p>`}</section>
+    <section class="sheet chores-sheet">${chores.map((c) => choreRow(c, true)).join("") || `<p class="empty-note">Aún no hay tareas.</p>`}</section>
     <p class="muted" style="margin-top:1.2rem">Para agregar o cambiar tareas: Ajustes → Casa y tareas.</p>`;
   bindBack();
   bindChores(chores, () => go("chores"));
@@ -1294,6 +1359,8 @@ async function start() {
   await home();
   resetIdle();
   startWake();
+  setTimeout(checkReminders, 5000);
+  setInterval(checkReminders, 60 * 1000);
   // Llegaron desde el código QR de la tablet: abrir directo la foto.
   const q = new URLSearchParams(location.search);
   const kind = q.get("scan");

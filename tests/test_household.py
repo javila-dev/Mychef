@@ -183,3 +183,49 @@ def test_wake_word_setting(client):
     assert client.put("/api/settings", json={"wake_word": "  Oye   Lupita "}).json()["wake_word"] == "Oye Lupita"
     assert client.get("/api/meta").json()["wake_word"] == "Oye Lupita"
     assert client.put("/api/settings", json={"wake_word": "a"}).status_code == 422
+
+
+def test_chore_calendar_schedules():
+    from app import household
+    from app.models import Chore
+
+    # Basura: lunes y jueves. Creada un miércoles (2026-09-23) → toca el jueves 24.
+    basura = Chore(name="Sacar la basura", schedule="weekdays", weekdays="0,3", created_on=dt.date(2026, 9, 23))
+    assert household.due_date(basura) == dt.date(2026, 9, 24)
+    assert household.when_text(basura) == "Los lunes y jueves"
+    basura.last_done = dt.date(2026, 9, 24)  # hecha el jueves → el lunes siguiente
+    assert household.due_date(basura) == dt.date(2026, 9, 28)
+
+    # Día 31 de cada mes: en septiembre (30 días) toca el 30
+    pago = Chore(name="Pagar el agua", schedule="monthday", month_day=31, created_on=dt.date(2026, 9, 2))
+    assert household.due_date(pago) == dt.date(2026, 9, 30)
+    pago.last_done = dt.date(2026, 9, 30)
+    assert household.due_date(pago) == dt.date(2026, 10, 31)
+    assert household.when_text(pago) == "El 31 de cada mes"
+
+    assert household.when_text(Chore(name="x", schedule="weekdays", weekdays="5,6")) == "Los fines de semana"
+    assert household.when_text(Chore(name="x", schedule="weekdays", weekdays="6")) == "Los domingos"
+    assert household.due_text(dt.date(2026, 10, 1), dt.date(2026, 9, 28)) == "el jueves"
+    assert household.due_text(dt.date(2026, 9, 29), dt.date(2026, 9, 28)) == "mañana"
+
+
+def test_chore_api_schedule_and_reminders(client):
+    from app import clock
+
+    papa = client.post("/api/members", json={"name": "Papá"}).json()
+    today = clock.today()
+    res = client.post("/api/chores", json={
+        "name": "Sacar la basura", "schedule": "weekdays", "weekdays": [today.weekday()],
+        "member_id": papa["id"], "remind_at": "19:30",
+    })
+    assert res.status_code == 201
+    chore = next(c for c in client.get("/api/chores").json() if c["name"] == "Sacar la basura")
+    assert chore["weekdays"] == [today.weekday()] and chore["remind_at"] == "19:30" and chore["is_due"]
+
+    rem = client.get("/api/reminders").json()
+    assert [r["say"] for r in rem["items"]] == ["Recordatorio: sacar la basura. Hoy le toca a Papá."]
+    client.post(f"/api/chores/{chore['id']}/done", json={"member_id": papa["id"]})
+    assert client.get("/api/reminders").json()["items"] == []
+
+    assert client.post("/api/chores", json={"name": "x", "schedule": "weekdays", "weekdays": []}).status_code == 422
+    assert client.post("/api/chores", json={"name": "x", "remind_at": "25:00"}).status_code == 422

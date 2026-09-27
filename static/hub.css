@@ -470,3 +470,6 @@ body.at-home #toast { top: 4.4rem; }
   .wake-toggle { font-size: .9rem; padding: .5rem .8rem !important; }
   body.at-home #toast { top: auto; bottom: 1.4rem; right: 1rem; left: 1rem; max-width: none; text-align: center; }
 }
+
+/* Horario de cada tarea (pantalla «Tareas de la casa») */
+.chore .txt .when { display: flex; align-items: center; gap: .35rem; flex-wrap: wrap; color: var(--muted); font-size: .92rem; margin-top: .15rem; }
