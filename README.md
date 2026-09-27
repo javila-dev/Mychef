@@ -100,6 +100,14 @@ tablet lee cada paso en voz alta; si le hablan encima, se calla y obedece.
 
 Los temporizadores aparecen arriba en todas las pantallas y, al terminar, suenan y lo dicen en voz alta.
 
+**La voz que contesta**: la tablet responde con las voces en español que trae instaladas. En
+**Ajustes → Casa y tareas → Voz de esta tablet** se elige cuál (y se escucha con **Probar**), la velocidad
+(despacio, normal, más rápido) y si contesta en voz alta o solo por escrito. Se guarda en cada aparato,
+así que conviene hacerlo desde la misma tablet de la nevera. Las alarmas de los temporizadores siempre suenan
+y hablan, aunque la voz esté apagada. Para voces más naturales en Android: *Ajustes → Sistema → Idiomas →
+Salida de texto a voz → Motor de Google → Instalar datos de voz → Español (Estados Unidos o México)*; las
+que dicen «con internet» suelen sonar mejor.
+
 **Palabra de activación («Oye casa»)**: en el inicio, junto a la hora, toquen **Digan «Oye casa»** para
 dejar la tablet escuchando sin tocarla (el punto verde parpadea mientras está activa). Luego:
 - de una vez: «Oye casa, se acabó la leche», o

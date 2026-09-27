@@ -232,6 +232,7 @@ const ICONS = {
   bulb: '<path d="M9 17.5h6M10 20.5h4M8.5 14c-1.5-1.2-2.5-3-2.5-5a6 6 0 0 1 12 0c0 2-1 3.8-2.5 5-.6.5-1 1.2-1 2v1.5h-5V16c0-.8-.4-1.5-1-2z"/>',
   box: '<path d="M3.5 8 12 4l8.5 4v8.5L12 20.5l-8.5-4z"/><path d="m3.5 8 8.5 4 8.5-4M12 12v8.5"/>',
   mic: '<rect x="9" y="3" width="6" height="11.5" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M8.5 21h7"/>',
+  speaker: '<path d="M4.5 9.5h3.5l4.5-4v13l-4.5-4H4.5z"/><path d="M16 9a4.2 4.2 0 0 1 0 6M18.5 6.5a7.8 7.8 0 0 1 0 11"/>',
 };
 
 // Las tareas se guardan con un emoji (así las crea Administrar); en pantalla se dibujan con íconos propios.

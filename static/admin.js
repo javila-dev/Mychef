@@ -5,6 +5,7 @@ import {
   CHORE_ICONS, avatar, choreIcon, compressImage, confirmModal, fmtAmount, fmtUnit, icon, modal as formModal,
   toPantryLine, toast, withBusy,
 } from "./common.js";
+import { getVoicePrefs, onVoicesReady, setVoicePrefs, speak } from "./voice.js";
 
 const view = $("#view");
 const modal = $("#modal");
@@ -683,6 +684,15 @@ async function renderHouse() {
           <button id="wake-word">${icon("mic", 18)} Cambiar</button></div>
         <p class="muted small" style="margin:0">Se dice antes de un comando de voz, por ejemplo «${esc(META.wake_word)}, se acabó la leche». Se activa en cada tablet con el botón que está junto a la hora.</p>
       </section>
+      <section class="card stack" id="voice-card">
+        <h2>Voz de esta tablet</h2>
+        <p class="muted small" style="margin:0">Cómo contesta en voz alta. Se guarda solo en este aparato: háganlo desde la tablet de la nevera.</p>
+        <label class="row spread"><span>Contestar en voz alta</span><input type="checkbox" id="v-on" style="width:1.4rem;height:1.4rem"></label>
+        <label class="field">Voz<select id="v-voice"><option value="">Cargando voces…</option></select></label>
+        <label class="field">Velocidad<select id="v-rate">
+          <option value="0.85">Despacio</option><option value="1">Normal</option><option value="1.15">Más rápido</option></select></label>
+        <div><button id="v-test">${icon("speaker", 18)} Probar</button></div>
+      </section>
       <section class="card stack">
         <h2>Personas de la casa</h2>
         <ul class="clean">${members.map((m) => `
@@ -738,6 +748,22 @@ async function renderHouse() {
       ],
     });
   };
+  const vp = getVoicePrefs();
+  $("#v-on").checked = vp.on;
+  $("#v-rate").value = String([0.85, 1, 1.15].includes(vp.rate) ? vp.rate : 1);
+  onVoicesReady((voices) => {
+    const sel = $("#v-voice");
+    if (!sel) return;
+    const cur = getVoicePrefs().uri;
+    sel.innerHTML = voices.length
+      ? `<option value="">Automática (${esc(voices[0].name)})</option>` + voices.map((v) => `
+          <option value="${esc(v.voiceURI)}" ${v.voiceURI === cur ? "selected" : ""}>${esc(v.name)} · ${esc(v.lang)}${v.localService ? "" : " · con internet"}</option>`).join("")
+      : `<option value="">Este navegador no tiene voces en español</option>`;
+  });
+  $("#v-on").onchange = (e) => { setVoicePrefs({ on: e.target.checked }); toast(e.target.checked ? "Va a contestar en voz alta" : "Solo va a contestar por escrito"); };
+  $("#v-voice").onchange = (e) => { setVoicePrefs({ uri: e.target.value }); speak("Hola, así sueno yo.", { force: true }); };
+  $("#v-rate").onchange = (e) => { setVoicePrefs({ rate: +e.target.value }); speak("Hola, así de rápido hablo.", { force: true }); };
+  $("#v-test").onclick = () => speak(`Hola, soy ${META.house_name}. Hoy hay arroz con pollo de almuerzo.`, { force: true });
   $("#wake-word").onclick = () => {
     formModal({
       title: "Palabra de activación", size: "narrow",

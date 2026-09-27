@@ -10,30 +10,56 @@ const LANG = "es-CO";
 
 // ---------------------------------------------------------------- hablar
 
+// Preferencias de la voz en ESTE dispositivo (cada tablet tiene sus propias voces instaladas).
+const VOICE_KEY = "mychef-voice";
+const DEFAULT_PREFS = { uri: "", rate: 1, on: true };
+export function getVoicePrefs() {
+  try { return { ...DEFAULT_PREFS, ...JSON.parse(localStorage.getItem(VOICE_KEY) || "{}") }; }
+  catch { return { ...DEFAULT_PREFS }; }
+}
+export function setVoicePrefs(prefs) {
+  try { localStorage.setItem(VOICE_KEY, JSON.stringify({ ...getVoicePrefs(), ...prefs })); } catch { /* sin almacenamiento */ }
+  pickVoice();
+}
+
+// Voces en español, primero las latinoamericanas.
+const RANK = ["es-CO", "es-419", "es-US", "es-MX"];
+export function spanishVoices() {
+  const voices = (window.speechSynthesis?.getVoices() ?? []).filter((v) => v.lang?.toLowerCase().startsWith("es"));
+  const rank = (v) => { const i = RANK.indexOf(v.lang.replace("_", "-")); return i < 0 ? RANK.length : i; };
+  return voices.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+}
+// Cuando el navegador termina de cargar la lista de voces (llega tarde en Chrome).
+export function onVoicesReady(fn) {
+  if (!window.speechSynthesis) return fn([]);
+  if (spanishVoices().length) fn(spanishVoices());
+  window.speechSynthesis.addEventListener?.("voiceschanged", () => fn(spanishVoices()));
+}
+
 let voice = null;
 function pickVoice() {
-  const voices = window.speechSynthesis?.getVoices() ?? [];
-  voice = voices.find((v) => v.lang === "es-CO")
-    ?? voices.find((v) => v.lang === "es-US" || v.lang === "es-419" || v.lang === "es-MX")
-    ?? voices.find((v) => v.lang?.startsWith("es"))
-    ?? null;
+  const list = spanishVoices();
+  const { uri } = getVoicePrefs();
+  voice = (uri && list.find((v) => v.voiceURI === uri)) || list[0] || null;
 }
 if (window.speechSynthesis) {
   pickVoice();
-  window.speechSynthesis.onvoiceschanged = pickVoice;
+  window.speechSynthesis.addEventListener?.("voiceschanged", pickVoice);
 }
 
-export function speak(text) {
+export function speak(text, { force = false } = {}) {
   return new Promise((resolve) => {
     if (!text || !window.speechSynthesis) return resolve();
+    const prefs = getVoicePrefs();
+    if (!prefs.on && !force) return resolve();
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.lang = voice?.lang ?? LANG;
     if (voice) u.voice = voice;
-    u.rate = 1;
+    u.rate = prefs.rate || 1;
     u.onend = u.onerror = () => resolve();
     window.speechSynthesis.speak(u);
-    setTimeout(resolve, Math.min(20000, 1500 + text.length * 90)); // por si el navegador no avisa
+    setTimeout(resolve, Math.min(20000, (1500 + text.length * 90) / (prefs.rate || 1))); // por si el navegador no avisa
   });
 }
 export function stopSpeaking() { window.speechSynthesis?.cancel(); }
@@ -206,11 +232,11 @@ function ring(t) {
   let n = 0;
   const loop = setInterval(() => {
     beep();
-    if (++n % 4 === 0) speak(`¡Se acabó el tiempo ${name}!`);
+    if (++n % 4 === 0) speak(`¡Se acabó el tiempo ${name}!`, { force: true });
     if (n > 60) stop();
   }, 900);
   beep();
-  speak(`¡Se acabó el tiempo ${name}!`);
+  speak(`¡Se acabó el tiempo ${name}!`, { force: true });
   const m = modal({
     size: "narrow", title: "",
     body: `<div class="done-msg"><div class="mark ring">${icon("clock", 46)}</div>
