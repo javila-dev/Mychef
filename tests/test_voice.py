@@ -8,7 +8,7 @@ TODAY = dt.date.today()
 
 
 @pytest.fixture(autouse=True)
-def no_claude(monkeypatch):
+def no_ai(monkeypatch):
     monkeypatch.setattr(vision, "voice_canonical", lambda *a, **k: None)
 
 
@@ -148,9 +148,9 @@ def test_navigation_help_and_unknown(client):
     assert r["intent"] == "unknown" and "Pueden decir" in r["speak"]
 
 
-def test_claude_fallback_rewrites_to_known_command(client, monkeypatch):
+def test_ai_fallback_rewrites_to_known_command(client, monkeypatch):
     seed(client)
-    monkeypatch.setattr(vision, "voice_canonical", lambda text, *a: "agrega queso a la lista")
+    monkeypatch.setattr(vision, "voice_canonical", lambda text, *a, **k: "agrega queso a la lista")
     r = say(client, "ay no, acuérdate de que nos quedamos sin quesito")
     assert r["intent"] == "list_add" and r["data"]["items"] == ["Queso"]
     assert r["data"]["understood_as"] == "agrega queso a la lista"
@@ -161,8 +161,8 @@ def test_parse_duration_unit():
     assert voice.parse_duration("minuto y medio") is None
 
 
-def test_handsfree_never_calls_claude(client, monkeypatch):
+def test_handsfree_never_calls_ai(client, monkeypatch):
     calls = []
-    monkeypatch.setattr(vision, "voice_canonical", lambda *a: calls.append(a) or "agrega queso")
+    monkeypatch.setattr(vision, "voice_canonical", lambda *a, **k: calls.append(a) or "agrega queso")
     r = say(client, "paso uno remojar las lentejas", screen="cook", handsfree=True)
     assert r["intent"] == "unknown" and calls == []

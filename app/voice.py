@@ -4,8 +4,8 @@ El navegador convierte la voz en texto (Web Speech API) y lo manda aquí. Este m
 frases en español coloquial con reglas locales (rápido, sin costo y sin internet) y ejecuta lo que
 toca: anotar en la lista, "se acabó", marcar tareas, leer el menú, abrir recetas, temporizadores…
 
-Si ninguna regla entiende la frase y hay credenciales de Anthropic, Claude la reescribe como uno de
-los comandos conocidos y se vuelve a interpretar. Cada acción que cambia datos devuelve cómo
+Si ninguna regla entiende la frase y hay clave de OpenAI, el modelo elegido en Ajustes la reescribe
+como uno de los comandos conocidos y se vuelve a interpretar. Cada acción que cambia datos devuelve cómo
 deshacerla, por si el micrófono entendió mal.
 """
 
@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 from sqlmodel import Session, select
 
-from . import clock, household, services
+from . import ai, clock, household, services
 from .models import Chore, Ingredient, Member, PantryItem, Recipe, ShoppingExtra
 from .units import strip_accents
 
@@ -171,9 +171,9 @@ def interpret(session: Session, text: str, context: dict | None = None, today: d
     if result is not None:
         return result
 
-    # Nada coincidió: pedirle a Claude que lo reescriba como un comando conocido (si hay clave).
+    # Nada coincidió: pedirle a la IA (OpenAI) que lo reescriba como un comando conocido (si hay clave).
     # En manos libres no: ahí se oye de todo (hasta la propia voz de la tablet) y solo cuentan comandos.
-    canonical = None if context.get("handsfree") else _claude_canonical(session, text, context)
+    canonical = None if context.get("handsfree") else _ai_canonical(session, text, context)
     if canonical:
         again = _rules(session, normalize(canonical), context, today, soft(canonical))
         if again is not None:
@@ -500,16 +500,18 @@ def _chores_summary(session: Session, today: dt.date) -> VoiceResult:
     return VoiceResult("chores", f"Pendientes: {'; '.join(said)}.")
 
 
-# ---------------------------------------------------------------- Claude (opcional)
+# ---------------------------------------------------------------- IA (opcional)
 
 
-def _claude_canonical(session: Session, text: str, context: dict) -> str | None:
-    """Pide a Claude reescribir la frase como un comando conocido. None si no hay clave o falla."""
+def _ai_canonical(session: Session, text: str, context: dict) -> str | None:
+    """Pide a la IA de texto reescribir la frase como un comando conocido. None si no hay clave o falla."""
     from . import vision  # importación tardía: el SDK solo se usa si hace falta
 
     recipes = [r.name for r in session.exec(select(Recipe))]
     chores = [c.name for c in session.exec(select(Chore))]
     try:
-        return vision.voice_canonical(text, recipes, chores, context.get("screen") or "home")
+        return vision.voice_canonical(
+            text, recipes, chores, context.get("screen") or "home", model=ai.model_for(session, "text")
+        )
     except vision.VisionError:
         return None

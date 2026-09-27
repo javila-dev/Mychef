@@ -17,7 +17,7 @@ import segno
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from . import clock, household, services, vision, voice
+from . import ai, clock, household, services, vision, voice
 from .auth import AuthMiddleware, check_pin, pin_enabled
 from . import db
 from .db import get_session, init_db
@@ -195,6 +195,8 @@ class SettingsIn(BaseModel):
     house_name: str | None = Field(None, max_length=60)
     wake_word: str | None = Field(None, max_length=40)
     inventory_mode: str | None = None
+    ai_photo_model: str | None = Field(None, max_length=80)
+    ai_text_model: str | None = Field(None, max_length=80)
 
 
 def _validate_meals(meals: list[str]) -> list[str]:
@@ -255,7 +257,7 @@ def meta(session: Session = SessionDep):
         "house_name": _house_name(session),
         "wake_word": _wake_word(session),
         "inventory_mode": services.inventory_mode(session),
-        "vision_model": vision.MODEL,
+        "ai": _ai_status(session),
         "chore_emojis": CHORE_EMOJIS,
     }
 
@@ -281,6 +283,13 @@ def update_settings(data: SettingsIn, session: Session = SessionDep):
         if len(word) < 3:
             raise HTTPException(422, "La palabra de activación es muy corta. Usen dos palabras, como «Oye casa».")
         session.merge(Setting(key="wake_word", value=word))
+    for role in ai.ROLES:
+        value = getattr(data, ai.ROLES[role]["setting"])
+        if value is not None:
+            value = value.strip().removeprefix("models/")
+            if value and not ai.MODEL_NAME.match(value):
+                raise HTTPException(422, "Ese nombre de modelo no es válido.")
+            session.merge(Setting(key=ai.ROLES[role]["setting"], value=value))
     if data.inventory_mode is not None:
         if data.inventory_mode not in services.INVENTORY_MODES:
             raise HTTPException(422, "Modo de inventario desconocido.")
@@ -291,7 +300,43 @@ def update_settings(data: SettingsIn, session: Session = SessionDep):
         "house_name": _house_name(session),
         "wake_word": _wake_word(session),
         "inventory_mode": services.inventory_mode(session),
+        "ai": _ai_status(session),
     }
+
+
+ai_model = ai.model_for
+
+
+def _ai_status(session: Session) -> dict:
+    return {
+        role: {"provider": r["provider"], "key_env": r["key_env"], "configured": ai.configured(role),
+               "model": ai_model(session, role), "default": r["default"]}
+        for role, r in ai.ROLES.items()
+    }
+
+
+@app.get("/api/ai/models")
+def ai_models(role: Literal["photo", "text"]):
+    """Modelos que su clave puede usar (para la lista de Ajustes)."""
+    try:
+        return {"models": ai.list_models(role)}
+    except ai.AIError as e:
+        raise HTTPException(e.status, str(e)) from e
+
+
+class AITestIn(BaseModel):
+    role: Literal["photo", "text"]
+
+
+@app.post("/api/ai/test")
+def ai_test(data: AITestIn, session: Session = SessionDep):
+    model = ai_model(session, data.role)
+    started = time.time()
+    try:
+        ai.test_model(data.role, model)
+    except ai.AIError as e:
+        raise HTTPException(e.status, str(e)) from e
+    return {"ok": True, "model": model, "seconds": round(time.time() - started, 1)}
 
 
 def _wake_word(session: Session) -> str:
@@ -500,7 +545,7 @@ async def scan_pantry(
     uploads = [*(photos or []), *([photo] if photo else [])]
     images = [(await p.read(), p.content_type or "") for p in uploads][:6]
     try:
-        result = vision.detect_pantry(images, known, place)
+        result = vision.detect_pantry(images, known, place, model=ai_model(session, "photo"))
     except vision.VisionError as e:
         raise HTTPException(e.status, str(e)) from e
     keys = {services.ingredient_key(n) for n in known}
@@ -540,7 +585,9 @@ async def import_recipe(
     if photo is not None and photo.filename:
         image = (await photo.read(), photo.content_type or "")
     try:
-        draft = vision.parse_recipe(text, image, known)
+        draft = vision.parse_recipe(
+            text, image, known, photo_model=ai_model(session, "photo"), text_model=ai_model(session, "text")
+        )
     except vision.VisionError as e:
         raise HTTPException(e.status, str(e)) from e
     data = draft.model_dump()
@@ -753,7 +800,7 @@ async def scan_receipt(photos: list[UploadFile] = File(...), session: Session = 
     known = [i.name for i in session.exec(select(Ingredient))]
     images = [(await p.read(), p.content_type or "") for p in photos]
     try:
-        receipt = vision.scan_receipt(images, known)
+        receipt = vision.scan_receipt(images, known, model=ai_model(session, "photo"))
     except vision.VisionError as e:
         raise HTTPException(e.status, str(e)) from e
     keys = {services.ingredient_key(n) for n in known}

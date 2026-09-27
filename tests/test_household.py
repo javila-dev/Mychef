@@ -70,7 +70,7 @@ def test_receipt_scan_and_save(client, monkeypatch):
     client.post("/api/shopping/extra", json={"name": "Detergente"})
     seen = {}
 
-    def fake_scan(images, known):
+    def fake_scan(images, known, model=None):
         seen["n"], seen["known"] = len(images), known
         return vision.Receipt(store="Éxito", date="2026-09-26", total=45900, notes="", items=[
             vision.ReceiptLine(raw_text="ARROZ DIANA 1000G", name="Arroz", quantity=1000, unit="g",
@@ -148,6 +148,7 @@ def test_old_database_gets_new_columns(tmp_path):
 def test_house_name_setting(client):
     assert client.get("/api/meta").json()["house_name"] == "Nuestra casa"
     res = client.put("/api/settings", json={"house_name": "Casa Ávila"}).json()
+    res.pop("ai")
     assert res == {"household_size": 4, "house_name": "Casa Ávila", "wake_word": "Oye casa", "inventory_mode": "normal"}
     client.put("/api/settings", json={"household_size": 5})
     meta = client.get("/api/meta").json()
@@ -229,3 +230,57 @@ def test_chore_api_schedule_and_reminders(client):
 
     assert client.post("/api/chores", json={"name": "x", "schedule": "weekdays", "weekdays": []}).status_code == 422
     assert client.post("/api/chores", json={"name": "x", "remind_at": "25:00"}).status_code == 422
+
+
+def test_ai_models_are_chosen_in_settings(client, monkeypatch):
+    from app import ai
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    meta = client.get("/api/meta").json()["ai"]
+    assert meta["photo"]["provider"] == "Gemini" and meta["photo"]["configured"] is False
+    assert meta["text"]["provider"] == "OpenAI" and meta["text"]["model"] == ai.DEFAULT_TEXT_MODEL
+
+    res = client.put("/api/settings", json={"ai_photo_model": "models/gemini-2.5-pro", "ai_text_model": "gpt-5"})
+    assert res.json()["ai"]["photo"]["model"] == "gemini-2.5-pro"  # sin el prefijo "models/"
+    assert res.json()["ai"]["text"]["model"] == "gpt-5"
+    assert client.put("/api/settings", json={"ai_text_model": "gpt 5; rm -rf"}).status_code == 422
+
+    # Sin clave: aviso claro, sin llamar a nadie
+    r = client.post("/api/ai/test", json={"role": "photo"})
+    assert r.status_code == 503 and "GEMINI_API_KEY" in r.json()["detail"]
+    assert client.get("/api/ai/models", params={"role": "text"}).json() == {"models": []}
+
+    # El escaneo usa el modelo elegido
+    seen = {}
+
+    def fake_detect(images, known, place="nevera", model=None):
+        seen["model"] = model
+        return vision.PantryDetection(notes="", items=[])
+
+    monkeypatch.setattr(vision, "detect_pantry", fake_detect)
+    client.post("/api/pantry/scan", files={"photo": ("n.jpg", b"1", "image/jpeg")})
+    assert seen["model"] == "gemini-2.5-pro"
+
+
+def test_ai_providers_map_errors(monkeypatch):
+    from app import ai
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    class FakeResponses:
+        def parse(self, **kw):
+            raise ai.openai.NotFoundError("no", response=__import__("httpx2").Response(404, request=__import__("httpx2").Request("POST", "http://x")), body=None)
+
+    class FakeClient:
+        def __init__(self, **kw):
+            self.responses = FakeResponses()
+
+    monkeypatch.setattr(ai.openai, "OpenAI", FakeClient)
+    try:
+        ai.openai_parse("gpt-inexistente", "hola", ai._Ping)
+    except ai.AIError as e:
+        assert e.status == 400 and "gpt-inexistente" in str(e)
+    else:
+        raise AssertionError("debía fallar")

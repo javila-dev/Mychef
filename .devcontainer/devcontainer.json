@@ -10,8 +10,9 @@
     "8000": { "label": "MyChef", "onAutoForward": "openBrowser" }
   },
   "containerEnv": { "MYCHEF_TZ": "America/Bogota" },
-  // Si guardan ANTHROPIC_API_KEY como secreto de Codespaces, funcionan las fotos con IA.
+  // Claves opcionales como secretos de Codespaces: Gemini para fotos, OpenAI para texto y voz.
   "secrets": {
-    "ANTHROPIC_API_KEY": { "description": "Opcional: para escanear facturas, la nevera y recetas con IA" }
+    "GEMINI_API_KEY": { "description": "Opcional: para leer facturas, la nevera y recetas en foto" },
+    "OPENAI_API_KEY": { "description": "Opcional: para recetas escritas y frases de voz difíciles" }
   }
 }

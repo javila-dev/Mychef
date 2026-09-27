@@ -4,8 +4,10 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # Opcional: habilita reconocer la despensa y recetas por foto
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Opcional: Gemini lee las fotos (facturas, nevera, recetas) y OpenAI el texto y la voz.
+      # Los modelos se eligen en Ajustes → Casa y tareas.
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       # Opcional: PIN de la casa (recomendado si la app queda publicada en internet)
       - MYCHEF_PIN=${MYCHEF_PIN:-}
       - MYCHEF_SECRET=${MYCHEF_SECRET:-}

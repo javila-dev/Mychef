@@ -312,3 +312,8 @@ dialog::backdrop { background: rgba(22, 32, 24, .45); animation: fade-in .22s va
 .when-btn { display: inline-flex; align-items: center; gap: .4rem; flex-wrap: wrap; text-align: left; }
 .when-btn .remind { display: inline-flex; align-items: center; gap: .2rem; color: var(--muted); font-size: .9em; }
 [data-sch][hidden] { display: none !important; }
+
+/* Modelos de IA (Administrar → Casa y tareas) */
+.ai-row + .ai-row { border-top: 1px dashed var(--line); padding-top: .8rem; }
+.ok-text { color: var(--green-ink); font-weight: 500; }
+.bad-text { color: var(--berry); font-weight: 500; }

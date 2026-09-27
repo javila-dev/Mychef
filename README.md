@@ -103,7 +103,7 @@ python -m app.seed
    privada a su cuenta de GitHub, y como es HTTPS el micrófono funciona.
 
 El codespace se apaga solo si no se usa (los datos se conservan mientras no lo borren). Las cuentas
-personales de GitHub traen horas gratis al mes. Para las fotos con IA, guarden `ANTHROPIC_API_KEY` en
+personales de GitHub traen horas gratis al mes. Para la IA, guarden `GEMINI_API_KEY` y `OPENAI_API_KEY` en
 *Settings → Codespaces → Secrets*.
 
 ### Con Docker
@@ -183,7 +183,7 @@ Requisitos del navegador para la voz:
   Si la app está publicada en internet con HTTPS, no hace falta nada.
 
 La frase se interpreta en el computador de la casa con reglas propias (rápido y gratis). Si alguien
-dice algo que no encaja y hay `ANTHROPIC_API_KEY`, Claude la traduce a uno de los comandos conocidos.
+dice algo que no encaja y hay `OPENAI_API_KEY`, el modelo de OpenAI elegido la traduce a uno de los comandos conocidos.
 
 ### PIN de la casa (recomendado si la app está en internet)
 
@@ -194,20 +194,25 @@ export MYCHEF_SECRET=algo-largo-y-aleatorio
 
 Cada dispositivo pide el PIN una sola vez y lo recuerda por un año. Tras 8 intentos fallidos se bloquea 5 minutos.
 
-### Reconocimiento con IA: facturas, nevera y recetas (opcional)
+### Inteligencia artificial: Gemini para fotos, OpenAI para texto (opcional)
 
-Escanear facturas, reconocer la despensa por foto e importar recetas usan Claude. Configuren una clave
-de API de Anthropic antes de arrancar:
+| Para qué | Proveedor | Clave |
+|---|---|---|
+| **Fotos**: facturas, nevera y alacena (con los números encima), recetas en foto | Google **Gemini** | `GEMINI_API_KEY` (o `GOOGLE_API_KEY`) |
+| **Texto y voz**: recetas escritas y frases que la tablet no entendió | **OpenAI** | `OPENAI_API_KEY` |
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+export GEMINI_API_KEY=...      # https://aistudio.google.com/apikey
+export OPENAI_API_KEY=sk-...   # https://platform.openai.com/api-keys
 ```
 
-Sin clave todo lo demás funciona igual; esos botones muestran un aviso. Cada factura cuesta del
-orden de unos pocos centavos de dólar en la API. El modelo se puede
-cambiar con `MYCHEF_MODEL` (por defecto `claude-opus-5`). Las solicitudes activan el
-*fallback* del lado del servidor (`fallbacks: "default"`), así que si el modelo principal
-declina una solicitud, la API la reintenta con otro modelo automáticamente.
+**El modelo de cada uno se elige en Ajustes → Casa y tareas → Inteligencia artificial.** Ahí se ve si la
+clave está lista, aparece la lista de modelos que su clave puede usar (se puede escribir cualquier otro) y
+el botón **Probar** confirma que funciona. Por defecto: `gemini-2.5-flash` y `gpt-5-mini` (también se
+pueden cambiar con `MYCHEF_PHOTO_MODEL` y `MYCHEF_TEXT_MODEL`).
+
+Sin claves todo lo demás funciona igual; esos botones muestran un aviso. Las claves se guardan en el
+computador de la casa (variables de entorno o secretos de Codespaces), nunca en la base de datos.
 
 ## Diseño
 
@@ -245,7 +250,8 @@ app/
   clock.py     La hora y el día de la casa (MYCHEF_TZ)
   services.py  Escalar recetas, disponibilidad, sugerencias, plan semanal, compras
   units.py     Unidades y conversiones
-  vision.py    Reconocimiento con Claude (facturas, despensa, recetas y frases de voz difíciles)
+  ai.py        Proveedores de IA: Gemini (fotos) y OpenAI (texto), claves y modelos
+  vision.py    Qué se le pide a la IA: facturas, despensa, recetas y frases de voz difíciles
   voice.py     Comandos de voz: entiende la frase y ejecuta la acción
   seed.py      Datos de ejemplo
 static/        index.html + hub.js/hub.css: pantalla de la casa · admin.html + admin.js: Administrar

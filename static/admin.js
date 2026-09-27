@@ -751,6 +751,51 @@ function readSchedule(form) {
   };
 }
 
+// ---------------------------------------------------------------- modelos de IA
+
+function aiRow(role, label, hint) {
+  const a = META.ai[role];
+  return `<div class="ai-row" data-role="${role}">
+    <div class="row spread"><b>${label} · ${a.provider}</b>
+      <span class="badge ${a.configured ? "ok" : "warn"}">${a.configured ? "Clave puesta" : `Falta ${a.key_env}`}</span></div>
+    <p class="muted small" style="margin:.1rem 0 .4rem">${hint}</p>
+    <label class="field">Modelo
+      <input data-ai-model list="dl-ai-${role}" value="${esc(a.model)}" autocomplete="off" spellcheck="false" placeholder="${esc(a.default)}"></label>
+    <datalist id="dl-ai-${role}"></datalist>
+    <div class="row" style="margin-top:.4rem"><button data-ai-test>${icon("check", 18)} Probar</button>
+      <span class="small muted" data-ai-status></span></div>
+  </div>`;
+}
+
+function bindAI() {
+  $$(".ai-row", view).forEach((row) => {
+    const role = row.dataset.role;
+    const status = (text, tone = "") => { const el = $("[data-ai-status]", row); el.textContent = text; el.className = `small ${tone || "muted"}`; };
+    if (META.ai[role].configured) {
+      api(`/api/ai/models?role=${role}`).then(({ models }) => {
+        $(`#dl-ai-${role}`).innerHTML = models.map((m) => `<option value="${esc(m)}">`).join("");
+        if (models.length) status(`${models.length} modelos disponibles con su clave`);
+      }).catch((e) => status(e.message, "bad-text"));
+    }
+    $("[data-ai-model]", row).onchange = (e) => safe(async () => {
+      const value = e.target.value.trim() || META.ai[role].default;
+      const res = await api("/api/settings", { method: "PUT", json: { [`ai_${role}_model`]: value } });
+      META.ai = res.ai;
+      e.target.value = META.ai[role].model;
+      toast(`Modelo de ${META.ai[role].provider}: ${META.ai[role].model}`);
+    });
+    $("[data-ai-test]", row).onclick = (e) => withBusy(e.currentTarget, async () => {
+      status("Probando…");
+      try {
+        const res = await api("/api/ai/test", { method: "POST", json: { role } });
+        status(`Funciona: ${res.model} respondió en ${res.seconds} s`, "ok-text");
+      } catch (err) {
+        status(err.message, "bad-text");
+      }
+    });
+  });
+}
+
 async function renderHouse() {
   const [members, chores, stats, spend] = await Promise.all([
     api("/api/members"), api("/api/chores"), api("/api/chores/stats"), api("/api/purchases"),
@@ -780,6 +825,12 @@ async function renderHouse() {
         <label class="field">Velocidad<select id="v-rate">
           <option value="0.85">Despacio</option><option value="1">Normal</option><option value="1.15">Más rápido</option></select></label>
         <div><button id="v-test">${icon("speaker", 18)} Probar</button></div>
+      </section>
+      <section class="card stack" id="ai-card">
+        <h2>Inteligencia artificial</h2>
+        ${aiRow("photo", "Fotos", "Facturas, nevera, alacena y recetas en foto.")}
+        ${aiRow("text", "Texto y voz", "Recetas escritas y frases que la tablet no entendió.")}
+        <p class="muted small" style="margin:0">Las claves se ponen en el computador de la casa (variables de entorno), no aquí.</p>
       </section>
       <section class="card stack">
         <h2>Personas de la casa</h2>
@@ -852,6 +903,7 @@ async function renderHouse() {
   $("#v-voice").onchange = (e) => { setVoicePrefs({ uri: e.target.value }); speak("Hola, así sueno yo.", { force: true }); };
   $("#v-rate").onchange = (e) => { setVoicePrefs({ rate: +e.target.value }); speak("Hola, así de rápido hablo.", { force: true }); };
   $("#v-test").onclick = () => speak(`Hola, soy ${META.house_name}. Hoy hay arroz con pollo de almuerzo.`, { force: true });
+  bindAI();
   $("#wake-word").onclick = () => {
     formModal({
       title: "Palabra de activación", size: "narrow",

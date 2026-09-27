@@ -1,29 +1,19 @@
-"""Reconocimiento con Claude: qué hay en la nevera/despensa y recetas escritas a mano.
-
-Necesita ANTHROPIC_API_KEY (o un perfil de `ant auth login`). Sin credenciales,
-el resto de la aplicación funciona igual y solo estas funciones quedan deshabilitadas.
+"""Reconocimiento con IA: facturas, nevera/despensa y recetas (fotos con Gemini) y frases
+de voz difíciles o recetas escritas (texto con OpenAI). Ver app/ai.py para claves y modelos.
 """
 
 from __future__ import annotations
 
-import base64
-import os
 from typing import Literal
 
-import anthropic
 from pydantic import BaseModel
 
+from . import ai
+from .ai import AIError as VisionError  # noqa: F401  (nombre usado por el resto de la app)
 from .models import DISH_TYPES, INGREDIENT_CATEGORIES, MEAL_TYPES
 
-MODEL = os.environ.get("MYCHEF_MODEL", "claude-opus-5")
 IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
-
-
-class VisionError(Exception):
-    def __init__(self, message: str, status: int = 502):
-        super().__init__(message)
-        self.status = status
 
 
 class DetectedItem(BaseModel):
@@ -84,63 +74,17 @@ class Receipt(BaseModel):
 UNITS_HINT = "g, kg, ml, l, taza, cda, cdta, unidad, lb, oz, o una unidad propia como 'diente', 'pizca', 'atado'"
 
 
-def _client() -> anthropic.Anthropic:
-    return anthropic.Anthropic()
-
-
-def _image_block(data: bytes, media_type: str) -> dict:
+def _check_image(data: bytes, media_type: str) -> tuple[bytes, str]:
     if media_type not in IMAGE_TYPES:
         raise VisionError("Formato de imagen no soportado. Usa JPG, PNG, WEBP o GIF.", 400)
     if len(data) > MAX_IMAGE_BYTES:
         raise VisionError("La imagen pesa más de 5 MB; tómala con menor resolución.", 400)
-    return {
-        "type": "image",
-        "source": {
-            "type": "base64",
-            "media_type": media_type,
-            "data": base64.standard_b64encode(data).decode("utf-8"),
-        },
-    }
-
-
-def _parse(content: list[dict], output_format: type[BaseModel], effort: str | None = None):
-    extra = {"output_config": {"effort": effort}} if effort else {}
-    try:
-        response = _client().beta.messages.parse(
-            model=MODEL,
-            max_tokens=16000,
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
-            messages=[{"role": "user", "content": content}],
-            output_format=output_format,
-            **extra,
-        )
-    except anthropic.AuthenticationError as e:
-        raise VisionError(
-            "Falta configurar ANTHROPIC_API_KEY para usar el reconocimiento por foto.", 503
-        ) from e
-    except anthropic.RateLimitError as e:
-        raise VisionError("Demasiadas solicitudes; intenta de nuevo en un momento.", 429) from e
-    except anthropic.APIStatusError as e:
-        raise VisionError(f"Error del servicio de reconocimiento ({e.status_code}).") from e
-    except anthropic.APIConnectionError as e:
-        raise VisionError("No se pudo conectar con el servicio de reconocimiento.") from e
-    except TypeError as e:
-        if "authentication" not in str(e):
-            raise
-        raise VisionError(  # sin credenciales configuradas
-            "Falta configurar ANTHROPIC_API_KEY para usar el reconocimiento por foto.", 503
-        ) from e
-
-    if response.stop_reason == "refusal":
-        raise VisionError("El modelo no pudo procesar esta solicitud.", 422)
-    if response.parsed_output is None:
-        raise VisionError("No se obtuvo una respuesta válida; intenta con otra foto.")
-    return response.parsed_output
+    return data, media_type
 
 
 def detect_pantry(
-    images: list[tuple[bytes, str]], known_ingredients: list[str], place: str = "nevera"
+    images: list[tuple[bytes, str]], known_ingredients: list[str], place: str = "nevera",
+    model: str | None = None,
 ) -> PantryDetection:
     known = ", ".join(sorted(known_ingredients)) or "(todavía no hay ingredientes registrados)"
     where = {"nevera": "la nevera (puede incluir la puerta y el congelador)", "alacena": "la alacena o despensa"}.get(
@@ -171,13 +115,13 @@ Si agrupaste varios iguales, señala uno de ellos. Si no puedes señalarlo, usa 
 - notes: una frase corta sobre lo que no se pudo identificar bien (o vacío)."""
     if not images:
         raise VisionError("Envíen al menos una foto.", 400)
-    content = [_image_block(data, media_type) for data, media_type in images]
-    content.append({"type": "text", "text": prompt})
-    return _parse(content, PantryDetection)
+    checked = [_check_image(data, media_type) for data, media_type in images]
+    return ai.gemini_parse(model or ai.DEFAULT_PHOTO_MODEL, checked, prompt, PantryDetection)
 
 
 def parse_recipe(
-    text: str | None, image: tuple[bytes, str] | None, known_ingredients: list[str]
+    text: str | None, image: tuple[bytes, str] | None, known_ingredients: list[str],
+    photo_model: str | None = None, text_model: str | None = None,
 ) -> RecipeDraft:
     known = ", ".join(sorted(known_ingredients)) or "(ninguno todavía)"
     prompt = f"""Convierte esta receta casera a un formato estructurado, respetando \
@@ -195,18 +139,17 @@ Reglas:
 - note: preparación del ingrediente ("picado", "en cubos") o vacío.
 - instructions: los pasos numerados, uno por línea, con las palabras de la familia.
 - notes: trucos o comentarios que aparezcan (o vacío)."""
-    content: list[dict] = []
-    if image:
-        content.append(_image_block(*image))
-    if text:
-        content.append({"type": "text", "text": f"<receta>\n{text}\n</receta>"})
-    if not content:
+    if not image and not text:
         raise VisionError("Envía el texto o una foto de la receta.", 400)
-    content.append({"type": "text", "text": prompt})
-    return _parse(content, RecipeDraft)
+    full = (f"<receta>\n{text}\n</receta>\n\n" if text else "") + prompt
+    if image:  # foto (con o sin texto): Gemini
+        return ai.gemini_parse(photo_model or ai.DEFAULT_PHOTO_MODEL, [_check_image(*image)], full, RecipeDraft)
+    return ai.openai_parse(text_model or ai.DEFAULT_TEXT_MODEL, full, RecipeDraft)
 
 
-def scan_receipt(images: list[tuple[bytes, str]], known_ingredients: list[str]) -> Receipt:
+def scan_receipt(
+    images: list[tuple[bytes, str]], known_ingredients: list[str], model: str | None = None
+) -> Receipt:
     """Lee una factura de supermercado (una o varias fotos de la misma factura)."""
     if not images:
         raise VisionError("Toma al menos una foto de la factura.", 400)
@@ -237,16 +180,17 @@ cosas de la casa, "otro" para lo demás (bolsas, propinas, domicilio, descuentos
 - store: nombre del almacén. date: fecha de la compra en formato AAAA-MM-DD, o null.
 - total: total pagado, o null.
 - notes: una frase corta si algo no se pudo leer bien (o vacío)."""
-    content = [_image_block(data, mt) for data, mt in images]
-    content.append({"type": "text", "text": prompt})
-    return _parse(content, Receipt)
+    checked = [_check_image(data, mt) for data, mt in images]
+    return ai.gemini_parse(model or ai.DEFAULT_PHOTO_MODEL, checked, prompt, Receipt)
 
 
 class VoiceCanonical(BaseModel):
     command: str | None
 
 
-def voice_canonical(text: str, recipes: list[str], chores: list[str], screen: str) -> str | None:
+def voice_canonical(
+    text: str, recipes: list[str], chores: list[str], screen: str, model: str | None = None
+) -> str | None:
     """Reescribe una frase dicha en la cocina como uno de los comandos que la casa entiende."""
     prompt = f"""Alguien de la familia le habló a la pantalla de la cocina. El reconocimiento de voz \
 entendió: <frase>{text}</frase>
@@ -265,5 +209,5 @@ Reescribe la intención como UNO de estos comandos, en español, con los nombres
 - "qué falta comprar", "qué se vence", "qué tareas hay"
 - en modo cocina: "siguiente", "anterior", "repite", "cuánto <ingrediente> lleva", "ingredientes"
 Si la frase no pide nada de esto o es ruido, command = null. No inventes productos ni tareas."""
-    result = _parse([{"type": "text", "text": prompt}], VoiceCanonical, effort="low")
+    result = ai.openai_parse(model or ai.DEFAULT_TEXT_MODEL, prompt, VoiceCanonical)
     return result.command

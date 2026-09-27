@@ -158,7 +158,7 @@ def test_scan_pantry_uses_household_names(client, monkeypatch):
     client.post("/api/recipes", json=arroz_con_pollo())
     seen = {}
 
-    def fake_detect(images, known, place="nevera"):
+    def fake_detect(images, known, place="nevera", model=None):
         seen["known"] = known
         return vision.PantryDetection(notes="", items=[
             vision.DetectedItem(name="Zanahorias", quantity=3, unit="unidad", category="verduras", confidence="alta", photo=0, x=250, y=500),
@@ -177,17 +177,17 @@ def test_scan_pantry_uses_household_names(client, monkeypatch):
 
 def test_scan_without_credentials_gives_clear_error(client, monkeypatch):
     def boom(*a, **kw):
-        raise vision.VisionError("Falta configurar ANTHROPIC_API_KEY", 503)
+        raise vision.VisionError("Falta configurar GEMINI_API_KEY", 503)
 
     monkeypatch.setattr(vision, "detect_pantry", boom)
     res = client.post("/api/pantry/scan", files={"photo": ("x.jpg", b"1", "image/jpeg")})
     assert res.status_code == 503
-    assert "ANTHROPIC_API_KEY" in res.json()["detail"]
+    assert "GEMINI_API_KEY" in res.json()["detail"]
 
 
 def test_image_validation():
     with pytest.raises(vision.VisionError):
-        vision._image_block(b"x", "application/pdf")
+        vision._check_image(b"x", "application/pdf")
 
 
 def test_index_served(client):
@@ -279,7 +279,7 @@ def test_fridge_scan_several_photos_and_not_seen(client, monkeypatch):
     client.post("/api/pantry", json={"name": "Queso", "quantity": 250, "unit": "g", "category": "lácteos y huevos"})
     got = {}
 
-    def fake_detect(images, known, place="nevera"):
+    def fake_detect(images, known, place="nevera", model=None):
         got["n"], got["place"] = len(images), place
         return vision.PantryDetection(notes="", items=[
             vision.DetectedItem(name="Leche", quantity=500, unit="ml", category="lácteos y huevos", confidence="alta", photo=1, x=100, y=900),
