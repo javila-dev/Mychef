@@ -467,6 +467,13 @@ PLACE_CATEGORIES = {
 }
 
 
+def _spot(item, n_photos: int) -> dict:
+    """Punto donde marcar el artículo (0–1 de ancho y alto) o None si no se pudo señalar."""
+    if 0 <= item.photo < n_photos and 0 <= item.x <= 1000 and 0 <= item.y <= 1000:
+        return {"photo": item.photo, "x": round(item.x / 1000, 4), "y": round(item.y / 1000, 4)}
+    return {"photo": None, "x": None, "y": None}
+
+
 @app.post("/api/pantry/scan")
 async def scan_pantry(
     photos: list[UploadFile] | None = File(None),
@@ -499,6 +506,7 @@ async def scan_pantry(
                 **i.model_dump(),
                 "category": i.category if i.category in categories else "otros",
                 "known": services.ingredient_key(i.name) in keys,
+                **_spot(i, len(images)),
             }
             for i in result.items
         ],

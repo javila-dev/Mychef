@@ -619,7 +619,7 @@ function fridgeModal(place = "nevera", remote = null) {
       fd.append("place", place);
       const d = await api("/api/pantry/scan", { method: "POST", body: fd });
       d.items.forEach((i) => { i.keep = i.confidence !== "baja"; });
-      state.draft = d;
+      Object.assign(state, { draft: d, urls: null, shown: 0, sel: null });
       review();
     } catch (e) {
       box.innerHTML = `<div class="done-msg"><div class="mark warn">${icon("warn", 44)}</div>
@@ -629,21 +629,60 @@ function fridgeModal(place = "nevera", remote = null) {
     }
   };
 
+  // Revisión: la foto con un marcador numerado sobre cada cosa reconocida, y la lista al lado.
+  // Tocar un marcador (o una fila) la selecciona para corregir qué es y cuánto hay;
+  // tocar un lugar vacío de la foto agrega algo que la IA no vio.
   const review = () => {
     const d = state.draft;
+    state.urls ??= state.photos.map((p) => URL.createObjectURL(p));
+    state.shown ??= 0;
     const kept = d.items.filter((i) => i.keep).length;
+    const sel = d.items[state.sel];
     const sure = { alta: "", media: "", baja: `<span class="badge warn">¿seguro?</span>` };
+    const pins = d.items.map((i, idx) => [i, idx]).filter(([i]) => i.photo === state.shown && i.x != null);
+    const unpinned = d.items.filter((i) => i.x == null).length;
     box.innerHTML = `
-      <p class="muted" style="margin:0 0 .4rem">Esto es lo que se ve y cuánto queda. Toquen el círculo para quitar lo que no sea,
-        y corrijan lo que haga falta. ${d.notes ? `<br>${esc(d.notes)}` : ""}</p>
-      ${d.items.map((i, idx) => `
-        <div class="rline ${i.keep ? "on" : "off"}" data-idx="${idx}">
-          <button class="circle" data-toggle aria-label="${i.keep ? "No guardar" : "Guardar"}">${i.keep ? icon("check", 22) : ""}</button>
-          <div class="who"><input class="nm" value="${esc(i.name)}" data-f="name" aria-label="Nombre"></div>
-          <div class="amt"><input type="number" step="any" min="0" value="${i.quantity}" data-f="quantity" aria-label="Cantidad">
-            <input value="${esc(i.unit)}" data-f="unit" aria-label="Unidad"></div>
-          <span class="price">${sure[i.confidence] ?? ""}</span>
-        </div>`).join("") || `<p class="empty-note">No se reconocieron alimentos en la foto.</p>`}
+      <div class="snap-cols">
+        <div class="snap-side">
+          ${state.urls.length > 1 ? `<div class="snap-tabs">${state.urls.map((_, n) => `
+            <button class="${n === state.shown ? "on" : ""}" data-shot="${n}">Foto ${n + 1}</button>`).join("")}</div>` : ""}
+          <div class="snap" id="snap">
+            <img src="${state.urls[state.shown]}" alt="Foto ${state.shown + 1} de ${where}" draggable="false">
+            ${pins.map(([i, idx]) => `
+              <button class="pin ${i.keep ? "" : "off"} ${i.confidence === "baja" ? "doubt" : ""} ${idx === state.sel ? "sel" : ""}"
+                style="left:${i.x * 100}%;top:${i.y * 100}%" data-pin="${idx}" aria-label="${idx + 1}: ${esc(i.name || "sin nombre")}">${idx + 1}</button>`).join("")}
+          </div>
+          <p class="muted small snap-hint">Toquen un número para corregirlo, o un lugar vacío de la foto para agregar algo que no vio.
+            ${unpinned ? `${unpinned} no se ${unpinned === 1 ? "pudo" : "pudieron"} señalar en la foto.` : ""}</p>
+          ${sel ? `
+            <div class="pin-edit" data-idx="${state.sel}">
+              <span class="pin-n">${state.sel + 1}</span>
+              <label class="field">¿Qué es?<input data-f="name" value="${esc(sel.name)}" placeholder="Ej: Queso" autocomplete="off"></label>
+              <div class="pin-amt">
+                <label class="field">¿Cuánto hay?<input type="number" step="any" min="0" data-f="quantity" value="${sel.quantity}"></label>
+                <label class="field">Unidad<input data-f="unit" value="${esc(sel.unit)}" list="dl-units-hub"></label>
+              </div>
+              <div class="row">
+                ${sel.manual
+                  ? `<button class="ghost" data-drop>${icon("trash", 18)} Quitar</button>`
+                  : `<button class="${sel.keep ? "ghost" : "primary"}" data-toggle>${sel.keep ? `${icon("close", 18)} No es eso, no guardar` : `${icon("check", 18)} Sí, guardarlo`}</button>`}
+                <button class="ghost" data-close-edit>${icon("check", 18)} Listo</button>
+              </div>
+            </div>` : ""}
+        </div>
+        <div class="snap-list">
+          ${d.notes ? `<p class="muted small" style="margin:0 0 .4rem">${esc(d.notes)}</p>` : ""}
+          ${d.items.map((i, idx) => `
+            <div class="rline ${i.keep ? "on" : "off"} ${idx === state.sel ? "sel" : ""}" data-idx="${idx}">
+              <button class="circle" data-toggle aria-label="${i.keep ? "No guardar" : "Guardar"}">${i.keep ? icon("check", 22) : ""}</button>
+              <button class="nm-btn" data-pick><span class="num">${idx + 1}</span>
+                <span class="nm-txt">${esc(i.name || "Sin nombre")}</span>
+                <span class="nm-amt">${esc(fmtAmount(i.quantity, i.unit))}</span></button>
+              <span class="price">${sure[i.confidence] ?? ""}</span>
+            </div>`).join("") || `<p class="empty-note">No se reconocieron alimentos. Toquen la foto donde está cada cosa para agregarla.</p>`}
+        </div>
+      </div>
+      <datalist id="dl-units-hub">${(META.units || []).map((u) => `<option value="${u}">`).join("")}</datalist>
       ${d.not_seen?.length ? `
         <div class="group-label">No se ve en la foto. ¿Se acabó? Tóquenlo y pasa a la lista de compras</div>
         <div class="tiles">${d.not_seen.map((n) => `
@@ -652,21 +691,49 @@ function fridgeModal(place = "nevera", remote = null) {
         <button class="primary big" id="save" ${kept || state.gone.size ? "" : "disabled"}>${icon("check")} Poner al día ${kept} cosa${kept === 1 ? "" : "s"}</button>
         <button class="ghost big" id="again">${icon("camera")} Tomar otra foto</button>
       </div>`;
-    $$("[data-toggle]", box).forEach((b) => b.onclick = () => {
-      const i = d.items[+b.closest(".rline").dataset.idx];
-      i.keep = !i.keep;
+
+    const itemOf = (el) => d.items[+el.closest("[data-idx]").dataset.idx];
+    const select = (idx) => {
+      state.sel = idx;
+      const i = d.items[idx];
+      if (i?.photo != null) state.shown = i.photo;
       review();
-    });
+    };
+    $$("[data-shot]", box).forEach((b) => b.onclick = () => { state.shown = +b.dataset.shot; review(); });
+    $$("[data-pin]", box).forEach((b) => b.onclick = (e) => { e.stopPropagation(); select(+b.dataset.pin); });
+    $$("[data-pick]", box).forEach((b) => b.onclick = () => select(+b.closest("[data-idx]").dataset.idx));
+    $("#snap", box).onclick = (e) => {
+      if (e.target.closest("[data-pin]")) return;
+      const r = e.currentTarget.getBoundingClientRect();
+      d.items.push({
+        name: "", quantity: 1, unit: "unidad", category: "otros", confidence: "alta", keep: true, manual: true,
+        photo: state.shown, x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height,
+      });
+      select(d.items.length - 1);
+      $(".pin-edit [data-f=name]", box)?.focus();
+    };
+    $$("[data-toggle]", box).forEach((b) => b.onclick = () => { const i = itemOf(b); i.keep = !i.keep; review(); });
+    $("[data-drop]", box)?.addEventListener("click", () => { d.items.splice(state.sel, 1); state.sel = null; review(); });
+    $("[data-close-edit]", box)?.addEventListener("click", () => { state.sel = null; review(); });
     $$("[data-f]", box).forEach((inp) => inp.onchange = () => {
-      const i = d.items[+inp.closest(".rline").dataset.idx];
+      const i = itemOf(inp);
       i[inp.dataset.f] = inp.dataset.f === "quantity" ? parseFloat(inp.value) || 0 : inp.value;
+      if (inp.closest(".pin-edit")) {
+        if (inp.dataset.f === "name") i.confidence = "alta"; // ya lo corrigió una persona
+        review();
+        $(`.pin-edit [data-f=${inp.dataset.f}]`, box)?.focus();
+      }
     });
     $$("[data-gone]", box).forEach((b) => b.onclick = () => {
       const n = b.dataset.gone;
       state.gone.has(n) ? state.gone.delete(n) : state.gone.add(n);
       review();
     });
-    $("#again", box).onclick = () => { state.photos = []; state.draft = null; state.gone.clear(); photos(); };
+    $("#again", box).onclick = () => {
+      Object.assign(state, { photos: [], draft: null, urls: null, shown: 0, sel: null });
+      state.gone.clear();
+      photos();
+    };
     $("#save", box).onclick = (e) => safe(async () => {
       const items = d.items.filter((i) => i.keep && i.name.trim());
       await withBusy(e.currentTarget, async () => {

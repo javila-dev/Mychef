@@ -32,6 +32,11 @@ class DetectedItem(BaseModel):
     unit: str
     category: str
     confidence: Literal["alta", "media", "baja"]
+    # Dónde está en las fotos, para marcarlo encima: número de foto (0 = la primera) y el centro
+    # del artículo en milésimas del ancho (x) y del alto (y). -1 si no se puede señalar.
+    photo: int
+    x: float
+    y: float
 
 
 class PantryDetection(BaseModel):
@@ -159,6 +164,10 @@ con confidence "baja". No incluyas platos ya preparados como ingredientes.
 - category: una de {", ".join(INGREDIENT_CATEGORIES)}.
 - confidence: "alta" si se ve con claridad, "media" si lo deduces del envase, "baja" si es una suposición.
 - No inventes cosas que no se vean. Agrupa artículos iguales en una sola línea.
+- photo, x, y: dónde está, para poner un marcador encima. photo es el número de la foto \
+(0 = la primera, en el orden en que llegaron). x, y es el centro del artículo en esa foto, en milésimas: \
+x = 0 borde izquierdo, 1000 borde derecho; y = 0 borde de arriba, 1000 borde de abajo. \
+Si agrupaste varios iguales, señala uno de ellos. Si no puedes señalarlo, usa -1 en los tres.
 - notes: una frase corta sobre lo que no se pudo identificar bien (o vacío)."""
     if not images:
         raise VisionError("Envíen al menos una foto.", 400)

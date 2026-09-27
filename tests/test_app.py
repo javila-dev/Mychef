@@ -161,8 +161,8 @@ def test_scan_pantry_uses_household_names(client, monkeypatch):
     def fake_detect(images, known, place="nevera"):
         seen["known"] = known
         return vision.PantryDetection(notes="", items=[
-            vision.DetectedItem(name="Zanahorias", quantity=3, unit="unidad", category="verduras", confidence="alta"),
-            vision.DetectedItem(name="Leche", quantity=1, unit="l", category="lácteos y huevos", confidence="media"),
+            vision.DetectedItem(name="Zanahorias", quantity=3, unit="unidad", category="verduras", confidence="alta", photo=0, x=250, y=500),
+            vision.DetectedItem(name="Leche", quantity=1, unit="l", category="lácteos y huevos", confidence="media", photo=3, x=-1, y=-1),
         ])
 
     monkeypatch.setattr(vision, "detect_pantry", fake_detect)
@@ -171,6 +171,8 @@ def test_scan_pantry_uses_household_names(client, monkeypatch):
     assert "Pechuga de pollo" in seen["known"]
     known = {i["name"]: i["known"] for i in res.json()["items"]}
     assert known == {"Zanahorias": True, "Leche": False}
+    spots = {i["name"]: (i["photo"], i["x"], i["y"]) for i in res.json()["items"]}
+    assert spots == {"Zanahorias": (0, 0.25, 0.5), "Leche": (None, None, None)}  # foto 3 no existe
 
 
 def test_scan_without_credentials_gives_clear_error(client, monkeypatch):
@@ -280,7 +282,7 @@ def test_fridge_scan_several_photos_and_not_seen(client, monkeypatch):
     def fake_detect(images, known, place="nevera"):
         got["n"], got["place"] = len(images), place
         return vision.PantryDetection(notes="", items=[
-            vision.DetectedItem(name="Leche", quantity=500, unit="ml", category="lácteos y huevos", confidence="alta"),
+            vision.DetectedItem(name="Leche", quantity=500, unit="ml", category="lácteos y huevos", confidence="alta", photo=1, x=100, y=900),
         ])
 
     monkeypatch.setattr(vision, "detect_pantry", fake_detect)
@@ -288,6 +290,7 @@ def test_fridge_scan_several_photos_and_not_seen(client, monkeypatch):
         ("photos", ("a.jpg", b"1", "image/jpeg")), ("photos", ("b.jpg", b"2", "image/jpeg")),
     ]).json()
     assert got == {"n": 2, "place": "nevera"}
+    assert (res["items"][0]["photo"], res["items"][0]["x"], res["items"][0]["y"]) == (1, 0.1, 0.9)
     assert [i["name"] for i in res["not_seen"]] == ["Queso"]
     # Guardar lo visto reemplaza la cantidad (la foto muestra lo que queda)
     client.post("/api/pantry/bulk", json=[{"name": "Leche", "quantity": 500, "unit": "ml", "replace": True}])

@@ -28,7 +28,10 @@ pocas palabras, siempre un **← Volver**, y si nadie la toca por 2 minutos vuel
 - **🍳 ¿Qué cocino?**: sus recetas que se pueden hacer ya, aprovechando lo que se vence.
 - **🫙 Se acabó algo**: se toca el producto y queda anotado en la lista.
 - **📷 Escanear → La nevera / La alacena**: una o varias fotos (la nevera, la puerta, el congelador).
-  La IA dice qué ve y **cuánto queda** (la leche a la mitad = 500 ml); se revisa y se toca **Poner al día**.
+  La IA dice qué ve y **cuánto queda** (la leche a la mitad = 500 ml) y pone **un número encima de cada cosa
+  en la foto**. Tocando un número se corrige ahí mismo qué es y cuánto hay (o «No es eso»); tocando un lugar
+  vacío de la foto se agrega algo que no vio. Luego **Poner al día**. Los marcadores son aproximados: la IA
+  señala el centro de cada cosa, no la recorta.
   Lo que según el inventario debía estar y no salió en la foto aparece como «¿Se acabó?»: al tocarlo pasa
   a la lista de compras. También por voz: «Oye casa, escanea la nevera».
 - **¿Con el celular o con la tablet?** Antes de cada foto (factura, nevera o alacena) la tablet pregunta:
