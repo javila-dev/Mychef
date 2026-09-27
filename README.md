@@ -106,10 +106,10 @@ declina una solicitud, la API la reintenta con otro modelo automáticamente.
 
 ## Diseño
 
-- **Referencia**: la pantalla de nevera **Samsung Family Hub**. El inicio muestra las **fotos de la
-  familia** a pantalla completa (van cambiando solas cada 45 segundos), la hora grande, dos widgets
-  (menú de hoy y tareas) y una bandeja de apps redondas: Escanear factura, Lista de compras,
-  ¿Qué cocino?, Se acabó algo y Fotos. Ajustes está en el botón de la esquina.
+- **Referencia**: la pantalla de nevera **Samsung Family Hub**, combinada con el contenido del inicio
+  anterior. Las **fotos de la familia** llenan la pantalla (cambian solas cada 45 segundos); encima se
+  ven la hora y el saludo, "Hoy en la mesa", "Pendientes de hoy" y "Ojo con esto", y abajo los botones
+  grandes de colores: Escanear factura, Lista de compras, ¿Qué cocino?, Se acabó algo, Fotos y Ajustes.
 - **Fotos**: se suben desde la app **Fotos** del inicio (desde la tablet o el celular). Se guardan en
   `data/photos/` junto a la base de datos. Mientras no haya fotos se ve un paisaje de colinas y un
   widget que invita a ponerlas.
@@ -118,8 +118,9 @@ declina una solicitud, la API la reintenta con otro modelo automáticamente.
 - **Colores**: grises neutros, superficies blancas y un verde como acento; modo oscuro automático.
 - Personas con su inicial en un círculo de color; tareas con íconos dibujados para la app.
 - Confirmaciones y formularios en ventanas (modales); nunca los cuadros de diálogo del navegador.
-- Rediseñada siguiendo el proceso de [Impeccable](https://impeccable.style) (dirección registrada en
-  `PRODUCT.md` y `.impeccable/surfaces/`, detector sin hallazgos y revisión final independiente).
+- Rediseñada siguiendo el proceso de [Impeccable](https://impeccable.style): producto en `PRODUCT.md`,
+  sistema visual en `DESIGN.md`, dirección en `.impeccable/surfaces/`, detector sin hallazgos y
+  revisión final independiente.
 
 ## Desarrollo
 

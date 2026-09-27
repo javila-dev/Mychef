@@ -20,7 +20,7 @@ OWN-WORLD: Foto de la familia a sangre completa que cambia sola con fundido lent
 
 STORY: De lejos se ve quiénes son (la foto), la hora y qué se come hoy; de cerca, a quién le toca qué. Todo lo demás está a un toque en la bandeja.
 
-FIRST VIEWPORT: Tablet horizontal. Izquierda: la foto respira libre con hora gigante y fecha encima. Derecha: columna de dos widgets (Hoy en el menú; Tareas de hoy con botón de marcar). Abajo, sobre el velo: bandeja de cinco apps (Factura, Lista con contador, ¿Qué cocino?, Se acabó, Fotos). Sin fotos: fondo de colinas vectoriales y un widget que invita a subir la primera.
+FIRST VIEWPORT: Tablet horizontal. Izquierda sobre la foto: hora gigante, saludo grande, fecha y casa; abajo, "Ojo con esto" (vencimientos y lo que se acaba, con "Ver qué cocinar con eso"). Derecha: "Hoy en la mesa" (platos con línea punteada y si tenemos todo) y "Pendientes de hoy" con botón de marcar. Fila inferior: los botones grandes del diseño anterior con explicación viva (Escanear factura, Lista de compras con contador, ¿Qué cocino?, Se acabó algo, Fotos) y el engranaje de Ajustes. Sin fotos: paisaje de colinas y una invitación compacta a ponerlas. (Combinación pedida por el usuario: fotos y estilo Family Hub + contenido del inicio anterior.)
 
 FORM: Canon de la categoría (salida estándar elegida por el usuario), referencia Samsung Family Hub; seed ddc1f9d1 (roll degradado, sin retadores).
 

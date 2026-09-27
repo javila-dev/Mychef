@@ -155,66 +155,78 @@ async function renderHome() {
   const pending = t.chores.filter((c) => !c.done_today);
   const shownChores = [...pending, ...t.chores.filter((c) => c.done_today)].slice(0, 3);
   const alerts = [
-    ...t.expiring.map((e) => `<span class="${e.days_left < 0 ? "bad" : "warn"}">${icon("clock", 18)} ${esc(e.name)} · ${daysText(e.days_left)}</span>`),
-    ...t.low_stock.map((n) => `<span class="warn">${icon("jar", 18)} Queda poco: ${esc(n)}</span>`),
+    ...t.expiring.map((e) => `<span class="label-tag ${e.days_left < 0 ? "bad" : ""}">${icon("clock", 18)} ${esc(e.name)} · ${daysText(e.days_left)}</span>`),
+    ...t.low_stock.map((n) => `<span class="label-tag low">${icon("jar", 18)} Queda poco: ${esc(n)}</span>`),
   ];
   const date = cap(new Date().toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" }));
   const current = PHOTOS[photoIdx];
+  const listHint = t.shopping_count ? `${t.shopping_count} cosa${t.shopping_count > 1 ? "s" : ""} por comprar` : "No falta nada";
+  const cookHint = t.expiring.length ? "Aprovechar lo que vence" : "Ideas con lo que hay";
+  const photoHint = PHOTOS.length ? `${PHOTOS.length} foto${PHOTOS.length > 1 ? "s" : ""}` : "Poner fotos";
 
   app.innerHTML = `
     <div class="home">
-      <header class="time-block">
-        <a class="corner-btn" href="/admin" title="Ajustes: recetas, inventario y tareas" aria-label="Ajustes">${icon("sliders", 24)}</a>
-        <div class="clock" id="clock">${clock()}</div>
-        <div class="today-line">${date}</div>
-        <div class="greet">${greeting()} · ${esc(META.house_name)}</div>
-        ${alerts.length ? `<div class="photo-alerts"><button class="alert-chip" id="alerts">${alerts[0]}${alerts.length > 1 ? ` <span class="more">y ${alerts.length - 1} más</span>` : ""}</button></div>` : ""}
-      </header>
-      <div class="photo-caption" id="caption">${esc(current?.caption ?? "")}</div>
+      <div class="left">
+        <header class="time-block">
+          <div class="clock" id="clock">${clock()}</div>
+          <h1 class="hello">${greeting()}</h1>
+          <div class="today-line">${date} · ${esc(META.house_name)}</div>
+        </header>
+
+        ${!firstRun && !PHOTOS.length ? `<button class="invite" data-act="photos">${icon("camera", 22)}
+          <span>Pongan fotos de la familia aquí de fondo</span><span class="go">Agregar</span></button>` : ""}
+
+        <div class="photo-caption" id="caption">${esc(current?.caption ?? "")}</div>
+
+        ${alerts.length ? `<section class="widget ojo">
+          <div class="w-head"><h2 class="w-title">${icon("warn", 22)} Ojo con esto</h2></div>
+          <div class="labels">${alerts.slice(0, 4).join("")}${alerts.length > 4 ? `<span class="label-tag more">+${alerts.length - 4} más</span>` : ""}</div>
+          ${t.expiring.length ? `<div class="w-more"><button class="btn-soft" data-act="what">${icon("pot", 20)} Ver qué cocinar con eso</button></div>` : ""}
+        </section>` : ""}
+      </div>
 
       <div class="widgets">
-        ${!firstRun && !PHOTOS.length ? `<section class="widget">
-          <div class="w-head"><h2 class="w-title">${icon("camera", 22)} Pongan sus fotos</h2></div>
-          <p class="empty-note">Las fotos de la familia se van turnando aquí de fondo.</p>
-          <div class="w-more"><button class="primary" data-act="photos">${icon("plus", 20)} Agregar fotos</button></div>
-        </section>` : ""}
         ${firstRun ? `<section class="widget">
           <div class="w-head"><h2 class="w-title">${icon("home", 22)} Bienvenidos</h2></div>
-          <p class="empty-note">Toquen ${icon("sliders", 18)} <b>Ajustes</b> (arriba a la derecha) para cargar sus recetas, las personas y las tareas, y <b>Fotos</b> para poner fotos de la familia.</p>
+          <p class="empty-note">Toquen <b>Ajustes</b> (abajo a la derecha) para cargar sus recetas, las personas y las tareas, y <b>Fotos</b> para poner fotos de la familia.</p>
         </section>` : ""}
 
-        <section class="widget">
-          <div class="w-head"><h2 class="w-title">${icon("pot", 22)} Hoy en el menú</h2></div>
+        <section class="widget mesa">
+          <h2>Hoy en la mesa</h2>
           ${t.meals.length ? t.meals.map((m) => `
-            <button class="meal-row ${m.cooked ? "done" : ""}" data-meal="${m.id}">
-              <span class="when">${esc(MEAL_LABEL[m.meal_type] ?? m.meal_type)}</span>
-              <span class="what"><span class="dish">${esc(m.recipe.name)}</span>
-                <span class="state ${m.cooked ? "" : m.can_cook ? "ok" : "miss"}">${m.cooked ? `${icon("check", 16)} Ya se cocinó`
-                  : m.can_cook ? `${icon("check", 16)} Tenemos todo` : `Falta: ${esc(m.missing.join(", "))}`}</span></span>
-              ${icon("chevron", 20)}
+            <button class="dish ${m.cooked ? "done" : ""}" data-meal="${m.id}">
+              <span class="line"><span class="when">${esc(MEAL_LABEL[m.meal_type] ?? m.meal_type)}</span><span class="dots"></span>
+                <span class="name">${esc(m.recipe.name)}</span></span>
+              <span class="state ${m.cooked ? "" : m.can_cook ? "ok" : "miss"}">${m.cooked ? `${icon("check", 16)} Ya se cocinó`
+                : m.can_cook ? `${icon("check", 16)} Tenemos todo` : `Falta: ${esc(m.missing.join(", "))}`}</span>
             </button>`).join("")
-          : t.setup.recipes ? `<p class="empty-note">Todavía no hay menú para hoy.</p>
-             <div class="w-more"><button class="primary" id="plan">${icon("spark", 20)} Armar el menú de la semana</button></div>`
-          : `<p class="empty-note">Cuando carguen sus recetas, aquí aparece lo que se come hoy.</p>`}
+          : t.setup.recipes ? `<p class="empty-note" style="text-align:center">Todavía no hay menú para hoy.</p>
+             <div class="w-more" style="text-align:center"><button class="primary" id="plan">${icon("spark", 20)} Armar el menú de la semana</button></div>`
+          : `<p class="empty-note" style="text-align:center">Cuando carguen sus recetas, aquí aparece lo que se come hoy.</p>`}
         </section>
 
         <section class="widget">
-          <div class="w-head"><h2 class="w-title">${icon("broom", 22)} Tareas de hoy</h2>
+          <div class="w-head"><h2 class="w-title">${icon("broom", 22)} Pendientes de hoy</h2>
             <small>${t.chores.length ? (pending.length ? `${pending.length} por hacer` : "¡Todo al día!") : ""}</small></div>
           ${shownChores.length ? shownChores.map(choreRow).join("")
             : `<p class="empty-note">${t.setup.chores ? "Nada pendiente por hoy." : "Aún no hay tareas. Se agregan en Ajustes."}</p>`}
-          ${t.setup.chores ? `<div class="w-more"><button data-act="chores">Ver todas${t.chores.length > 3 ? ` (${t.chores.length})` : ""}</button></div>` : ""}
+          ${t.setup.chores ? `<div class="w-more"><button data-act="chores">${icon("broom", 18)} Ver todas las tareas${t.chores.length > 3 ? ` (${t.chores.length})` : ""}</button></div>` : ""}
         </section>
-
       </div>
 
-      <nav class="dock" aria-label="Apps de la casa">
-        <button class="app app-scan" data-act="receipt"><span class="disc">${icon("receipt", 34)}</span><span class="name">Escanear factura</span></button>
-        <button class="app app-list" data-act="shopping"><span class="disc">${icon("basket", 34)}
-          ${t.shopping_count ? `<span class="count" aria-label="${t.shopping_count} por comprar">${t.shopping_count}</span>` : ""}</span><span class="name">Lista de compras</span></button>
-        <button class="app app-cook" data-act="what"><span class="disc">${icon("pot", 34)}</span><span class="name">¿Qué cocino?</span></button>
-        <button class="app app-out" data-act="ranout"><span class="disc">${icon("jar", 34)}</span><span class="name">Se acabó algo</span></button>
-        <button class="app app-photos" data-act="photos"><span class="disc">${icon("camera", 34)}</span><span class="name">Fotos</span></button>
+      <nav class="actions" aria-label="Qué quieren hacer">
+        <button class="act act-scan" data-act="receipt">${icon("receipt", 34)}
+          <span><span class="label">Escanear factura</span><span class="hint">Una foto y queda todo guardado</span></span></button>
+        <button class="act act-list" data-act="shopping">${icon("basket", 34)}
+          ${t.shopping_count ? `<span class="count" aria-label="${t.shopping_count} por comprar">${t.shopping_count}</span>` : ""}
+          <span><span class="label">Lista de compras</span><span class="hint">${listHint}</span></span></button>
+        <button class="act act-cook" data-act="what">${icon("pot", 34)}
+          <span><span class="label">¿Qué cocino?</span><span class="hint">${cookHint}</span></span></button>
+        <button class="act act-out" data-act="ranout">${icon("jar", 34)}
+          <span><span class="label">Se acabó algo</span><span class="hint">Anotarlo en la lista</span></span></button>
+        <button class="act act-photos" data-act="photos">${icon("camera", 30)}
+          <span><span class="label">Fotos</span><span class="hint">${photoHint}</span></span></button>
+        <a class="act act-admin" href="/admin" title="Ajustes: recetas, inventario y tareas" aria-label="Ajustes">${icon("sliders", 28)}<span class="label only-phone">Ajustes</span></a>
       </nav>
     </div>`;
 
@@ -223,12 +235,6 @@ async function renderHome() {
     ranout: ranOutModal, chores: () => go("chores"), photos: photosModal,
   };
   $$("[data-act]", app).forEach((b) => b.onclick = () => ACTS[b.dataset.act]());
-  $("#alerts")?.addEventListener("click", () => modal({
-    title: "Ojo con esto", size: "narrow",
-    body: `<ul class="alert-list">${alerts.map((a) => `<li>${a}</li>`).join("")}</ul>`,
-    actions: [{ label: "Ver qué cocinar con eso", tone: "plain", icon: "pot", onClick: () => { go("what"); } },
-      { label: "Listo", tone: "primary", icon: "check" }],
-  }));
   $$("[data-meal]", app).forEach((el) => el.onclick = () => {
     const m = t.meals.find((x) => x.id === +el.dataset.meal);
     go("cook", { recipeId: m.recipe.id, servings: m.servings, entryId: m.cooked ? null : m.id });
@@ -300,8 +306,8 @@ async function photosModal() {
 
 function choreRow(c) {
   const who = c.done_today
-    ? `Hecho${c.last_done_by ? ` por ${avatar(c.last_done_by, 24)} ${esc(c.last_done_by.name)}` : ""}`
-    : c.turn ? `Le toca a ${avatar(c.turn, 24)} ${esc(c.turn.name)}` : "Cualquiera puede";
+    ? `Hecho${c.last_done_by ? ` por ${avatar(c.last_done_by, 26)} ${esc(c.last_done_by.name)}` : ""}`
+    : c.turn ? `Le toca a ${avatar(c.turn, 26)} ${esc(c.turn.name)}` : "Cualquiera puede";
   const late = !c.done_today && c.days_late ? ` · <span class="late">atrasada ${c.days_late} día${c.days_late > 1 ? "s" : ""}</span>` : "";
   const next = !c.is_due && !c.done_today
     ? ` · ${new Date(c.due_on + "T12:00").toLocaleDateString("es", { weekday: "long", day: "numeric" })}` : "";
