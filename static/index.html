@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MyChef · El menú de la casa</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍲</text></svg>">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>🍲 MyChef</h1>
+    <label class="household">Personas en casa
+      <input id="household" type="number" min="1" max="50" value="4">
+    </label>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button data-view="menu" class="active">Menú</button>
+    <button data-view="cook">¿Qué cocino?</button>
+    <button data-view="recipes">Recetas</button>
+    <button data-view="pantry">Despensa</button>
+    <button data-view="shopping">Compras</button>
+  </nav>
+
+  <main id="view"></main>
+
+  <dialog id="modal"><div id="modal-body"></div></dialog>
+  <div id="toast" role="status"></div>
+
+  <script src="/static/app.js" type="module"></script>
+</body>
+</html>

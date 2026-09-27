@@ -1,0 +1,11 @@
+services:
+  mychef:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # Opcional: habilita reconocer la despensa y recetas por foto
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
