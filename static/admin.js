@@ -2,7 +2,7 @@
 
 import {
   $, $$, REASON_TEXT, addDays, api, cap, esc, fmtDay, fmtMoney, fmtQty, isoDate, mondayOf, safe,
-  compressImage, fmtUnit, toPantryLine, toast,
+  compressImage, confirmModal, fmtAmount, fmtUnit, icon, modal as formModal, toPantryLine, toast,
 } from "./common.js";
 
 const view = $("#view");
@@ -62,14 +62,14 @@ async function renderMenu() {
   view.innerHTML = `
     <div class="row spread" style="margin-bottom:.75rem">
       <div class="row">
-        <button id="prev">◀</button>
+        <button id="prev" aria-label="Semana anterior">${icon("back", 20)}</button>
         <strong>Semana del ${weekStart.toLocaleDateString("es", { day: "numeric", month: "long" })}</strong>
-        <button id="next">▶</button>
+        <button id="next" aria-label="Semana siguiente">${icon("chevron", 20)}</button>
         <button class="ghost" id="thisweek">Hoy</button>
       </div>
       <div class="row">
-        <button class="primary" id="autoplan">✨ Planear con lo que hay</button>
-        <button id="to-shopping">🛒 Lista de compras</button>
+        <button class="primary" id="autoplan">${icon("spark", 20)} Planear con lo que hay</button>
+        <button id="to-shopping">${icon("basket", 20)} Lista de compras</button>
       </div>
     </div>
     <div class="week">
@@ -81,13 +81,13 @@ async function renderMenu() {
             const list = entries.filter((e) => e.day === iso && e.meal_type === m);
             return `<div class="slot">
               <div class="row spread"><span class="slot-title">${esc(m)}</span>
-                <button class="ghost small" data-add="${iso}|${m}" title="Agregar">＋</button></div>
+                <button class="ghost small" data-add="${iso}|${m}" title="Agregar">${icon("plus", 18)}</button></div>
               ${list.map((e) => `
                 <div class="entry ${e.cooked ? "cooked" : ""}">
                   <a data-recipe="${e.recipe.id}" data-servings="${e.servings}">${esc(e.recipe.name)}</a>
                   <span class="muted small">${e.servings}p</span>
-                  ${e.cooked ? `<span class="badge ok">hecho</span>` : `<button title="Ya lo cociné: descontar de la despensa" data-cook="${e.id}">✓</button>`}
-                  <button class="ghost danger" title="Quitar" data-del="${e.id}">✕</button>
+                  ${e.cooked ? `<span class="badge ok">hecho</span>` : `<button title="Ya lo cociné: descontar de la despensa" data-cook="${e.id}">${icon("check", 18)}</button>`}
+                  <button class="ghost danger" title="Quitar" data-del="${e.id}">${icon("close", 18)}</button>
                 </div>`).join("")}
             </div>`;
           }).join("")}
@@ -106,6 +106,7 @@ async function renderMenu() {
   });
   $$("[data-recipe]", view).forEach((a) => a.onclick = () => showRecipe(+a.dataset.recipe, +a.dataset.servings));
   $$("[data-del]", view).forEach((b) => b.onclick = () => safe(async () => {
+    if (!await confirmModal({ title: "¿Quitar del menú?", text: "Solo se quita de ese día; la receta no se borra.", ok: "Quitar", tone: "danger", okIcon: "trash" })) return;
     await api(`/api/menu/${b.dataset.del}`, { method: "DELETE" });
     refresh();
   }));
@@ -118,7 +119,7 @@ async function renderMenu() {
 
 function autoplanDialog() {
   openModal(`
-    <div class="modal-head"><h2>Planear la semana</h2><button class="ghost" id="x">✕</button></div>
+    <div class="modal-head"><h2>Planear la semana</h2><button class="m-x" id="x" aria-label="Cerrar">${icon("close")}</button></div>
     <p class="muted">Llena los espacios vacíos con sus recetas, priorizando lo que ya hay en la despensa,
       lo que está por vencerse y lo que hace rato no cocinan. No toca lo que ya planearon.</p>
     <div class="stack">
@@ -146,7 +147,7 @@ function autoplanDialog() {
 async function pickRecipeDialog(day, meal) {
   const sugg = await api(`/api/suggestions?meal_type=${encodeURIComponent(meal)}&limit=50`);
   openModal(`
-    <div class="modal-head"><h2>${esc(cap(meal))} · ${esc(fmtDay(new Date(day + "T12:00")))}</h2><button class="ghost" id="x">✕</button></div>
+    <div class="modal-head"><h2>${esc(cap(meal))} · ${esc(fmtDay(new Date(day + "T12:00")))}</h2><button class="m-x" id="x" aria-label="Cerrar">${icon("close")}</button></div>
     <label class="field" style="max-width:10rem">Porciones<input id="pk-serv" type="number" min="1" value="${META.household_size}"></label>
     ${sugg.length ? `<ul class="clean" style="margin-top:.5rem">${sugg.map((s) => `
       <li class="row spread">
@@ -191,7 +192,7 @@ async function renderCook(filters = {}) {
           ${s.can_cook ? `<span class="badge ok">se puede hacer ya</span>` : `<span class="badge bad">faltan ${s.missing.length}</span>`}
         </div>
         <div class="row small"><span class="badge">${esc(s.recipe.dish_type)}</span>
-          ${s.recipe.favorite ? `<span class="badge accent">★ favorita</span>` : ""}
+          ${s.recipe.favorite ? `<span class="badge accent">${icon("star", 14)} favorita</span>` : ""}
           ${s.uses_expiring.length ? `<span class="badge warn">aprovecha: ${esc(s.uses_expiring.join(", "))}</span>` : ""}</div>
         ${coverageBar(s.coverage)}
         ${s.missing.length ? `<div class="small">Falta: ${s.missing.map((m) => `${esc(m.name)} (${fmtQty(m.quantity)} ${esc(fmtUnit(m.quantity, m.unit))})`).join(", ")}</div>` : ""}
@@ -229,17 +230,17 @@ async function renderRecipes(filters = {}) {
         <select id="r-dish">${options(META.dish_types, filters.dish_type, "Todo tipo")}</select>
       </div>
       <div class="row">
-        <button id="r-import">📷 Importar receta escrita</button>
-        <button class="primary" id="r-new">＋ Nueva receta</button>
+        <button id="r-import">${icon("camera", 20)} Importar receta escrita</button>
+        <button class="primary" id="r-new">${icon("plus", 20)} Nueva receta</button>
       </div>
     </div>
     ${recipes.length ? `<div class="grid">${recipes.map((r) => `
       <article class="card stack" data-open="${r.id}" style="cursor:pointer">
-        <div class="row spread"><strong>${r.favorite ? "★ " : ""}${esc(r.name)}</strong>
+        <div class="row spread"><strong>${r.favorite ? icon("star", 18) + " " : ""}${esc(r.name)}</strong>
           <span class="muted small">${r.servings} porc.</span></div>
         <div class="row small">${r.meal_types.map((m) => `<span class="badge accent">${esc(m)}</span>`).join("")}
           <span class="badge">${esc(r.dish_type)}</span>
-          ${r.prep_minutes ? `<span class="muted">⏱ ${r.prep_minutes} min</span>` : ""}</div>
+          ${r.prep_minutes ? `<span class="muted">${icon("clock", 16)} ${r.prep_minutes} min</span>` : ""}</div>
         ${coverageBar(r.coverage)}
       </article>`).join("")}</div>`
       : `<div class="empty card">Todavía no hay recetas. Agreguen las que cocinan en casa, con sus cantidades,
@@ -254,24 +255,24 @@ async function renderRecipes(filters = {}) {
   $$("[data-open]", view).forEach((c) => c.onclick = () => showRecipe(+c.dataset.open));
 }
 
-const STATUS_ICON = { ok: "✅", hay: "🟢", poco: "🟡", falta: "❌" };
-const STATUS_TEXT = { ok: "hay suficiente", hay: "hay, pero en otra unidad: agrega su equivalencia (⚖) en la despensa", poco: "no alcanza", falta: "no hay" };
+const STATUS_ICON = { ok: ["check", "st-ok"], hay: ["check", "st-ok"], poco: ["dot", "st-poco"], falta: ["close", "st-falta"] };
+const STATUS_TEXT = { ok: "hay suficiente", hay: "hay, pero en otra unidad: agrega su equivalencia en la despensa", poco: "no alcanza", falta: "no hay" };
 
 async function showRecipe(id, servings) {
   const r = await api(`/api/recipes/${id}${servings ? `?servings=${servings}` : ""}`);
   const byId = Object.fromEntries(r.availability.items.map((i) => [i.ingredient_id, i]));
   openModal(`
     <div class="modal-head">
-      <div><h2>${r.favorite ? "★ " : ""}${esc(r.name)}</h2>
+      <div><h2>${r.favorite ? icon("star", 18) + " " : ""}${esc(r.name)}</h2>
         <div class="row small">${r.meal_types.map((m) => `<span class="badge accent">${esc(m)}</span>`).join("")}
           <span class="badge">${esc(r.dish_type)}</span>
-          ${r.prep_minutes ? `<span class="muted">⏱ ${r.prep_minutes} min</span>` : ""}
+          ${r.prep_minutes ? `<span class="muted">${icon("clock", 16)} ${r.prep_minutes} min</span>` : ""}
           <span class="muted">Receta original: ${r.servings} porciones</span></div></div>
-      <button class="ghost" id="x">✕</button>
+      <button class="m-x" id="x" aria-label="Cerrar">${icon("close")}</button>
     </div>
     <div class="row" style="margin:.75rem 0">
       <span>Para</span>
-      <button id="minus">−</button><strong id="serv">${r.scaled_to}</strong><button id="plus">＋</button>
+      <button id="minus" aria-label="Menos">${icon("minus", 18)}</button><strong id="serv">${r.scaled_to}</strong><button id="plus" aria-label="Más">${icon("plus", 18)}</button>
       <span>porciones</span>
       ${r.factor !== 1 ? `<span class="badge">× ${fmtQty(r.factor)}</span>` : ""}
       ${r.availability.can_cook ? `<span class="badge ok">Hay todo en casa</span>` : `<span class="badge bad">Faltan ${r.availability.missing_count}</span>`}
@@ -279,8 +280,8 @@ async function showRecipe(id, servings) {
     <h3>Ingredientes</h3>
     <ul class="clean">${r.ingredients.map((i) => {
       const a = byId[i.ingredient_id];
-      return `<li><span class="ing-status" title="${STATUS_TEXT[a.status]}">${STATUS_ICON[a.status]}</span>
-        <strong>${i.quantity ? fmtQty(i.quantity) + " " + esc(i.unit) : ""}</strong> ${esc(i.name)}
+      return `<li><span class="ing-status ${STATUS_ICON[a.status][1]}" title="${STATUS_TEXT[a.status]}">${icon(STATUS_ICON[a.status][0], 20)}</span>
+        <strong>${i.quantity ? esc(fmtAmount(i.quantity, i.unit)) : ""}</strong> ${esc(i.name)}
         ${i.note ? `<span class="muted">— ${esc(i.note)}</span>` : ""}
         ${i.optional ? `<span class="badge">opcional</span>` : ""}
         ${a.have != null ? `<span class="muted small">(hay ${fmtQty(a.have)} ${esc(a.have_unit)})</span>` : ""}</li>`;
@@ -288,7 +289,7 @@ async function showRecipe(id, servings) {
     ${r.instructions ? `<h3>Preparación</h3><div class="instructions">${esc(r.instructions)}</div>` : ""}
     ${r.notes ? `<h3>Notas de la casa</h3><div class="instructions muted">${esc(r.notes)}</div>` : ""}
     <div class="row" style="margin-top:1rem">
-      <button class="primary" id="cooked">✓ La cociné (descontar de la despensa)</button>
+      <button class="primary" id="cooked">${icon("check", 20)} La cociné (descontar de la despensa)</button>
       <button id="edit">Editar</button>
       <button class="danger" id="del">Eliminar</button>
     </div>`);
@@ -299,7 +300,7 @@ async function showRecipe(id, servings) {
   $("#plus").onclick = () => safe(() => showRecipe(id, n + 1));
   $("#edit").onclick = () => safe(async () => recipeForm(await api(`/api/recipes/${id}`)));
   $("#del").onclick = () => safe(async () => {
-    if (!confirm(`¿Eliminar "${r.name}"? También se quita del menú.`)) return;
+    if (!await confirmModal({ title: "¿Eliminar la receta?", text: `«${esc(r.name)}» se borra y también se quita del menú.`, ok: "Eliminar", tone: "danger", okIcon: "trash" })) return;
     await api(`/api/recipes/${id}`, { method: "DELETE" });
     closeModal();
     refresh();
@@ -317,7 +318,7 @@ async function recipeForm(recipe = null) {
   const r = recipe ?? { name: "", meal_types: ["almuerzo"], dish_type: "plato principal", servings: META.household_size, prep_minutes: null, instructions: "", notes: "", favorite: false, ingredients: [] };
   const catByName = Object.fromEntries(ingredients.map((i) => [i.name.toLowerCase(), i.category]));
   openModal(`
-    <div class="modal-head"><h2>${recipe?.id ? "Editar receta" : "Nueva receta"}</h2><button class="ghost" id="x">✕</button></div>
+    <div class="modal-head"><h2>${recipe?.id ? "Editar receta" : "Nueva receta"}</h2><button class="m-x" id="x" aria-label="Cerrar">${icon("close")}</button></div>
     <datalist id="dl-ing">${ingredients.map((i) => `<option value="${esc(i.name)}">`).join("")}</datalist>
     <datalist id="dl-unit">${META.units.concat(["diente", "pizca", "atado", "rama", "lata", "paquete"]).map((u) => `<option value="${u}">`).join("")}</datalist>
     <form id="rf" class="stack">
@@ -329,11 +330,11 @@ async function recipeForm(recipe = null) {
       </div>
       <div class="row">Se come en: ${META.meal_types.map((m) => `
         <label class="row"><input type="checkbox" name="meal" value="${m}" ${r.meal_types.includes(m) ? "checked" : ""}> ${cap(m)}</label>`).join("")}
-        <label class="row" style="margin-left:auto"><input type="checkbox" name="favorite" ${r.favorite ? "checked" : ""}> ★ Favorita</label>
+        <label class="row" style="margin-left:auto"><input type="checkbox" name="favorite" ${r.favorite ? "checked" : ""}> Favorita</label>
       </div>
       <h3>Ingredientes <span class="muted small">(las cantidades exactas para ${r.servings} porciones como la hacen en casa)</span></h3>
       <div id="ing-rows" class="stack"></div>
-      <div><button type="button" id="add-ing">＋ Ingrediente</button></div>
+      <div><button type="button" id="add-ing">${icon("plus", 18)} Ingrediente</button></div>
       <label class="field">Preparación (un paso por línea)<textarea name="instructions">${esc(r.instructions)}</textarea></label>
       <label class="field">Notas y trucos de la casa<textarea name="notes" style="min-height:3rem">${esc(r.notes)}</textarea></label>
       <div class="row"><button class="primary" type="submit">Guardar</button></div>
@@ -349,7 +350,7 @@ async function recipeForm(recipe = null) {
       <input class="ing-unit" list="dl-unit" placeholder="Unidad" value="${esc(i.unit)}">
       <input class="ing-note" placeholder="Nota (picado…)" value="${esc(i.note)}">
       <label class="small row" title="Opcional"><input type="checkbox" class="ing-opt" ${i.optional ? "checked" : ""}>opc.</label>
-      <button type="button" class="ghost danger" title="Quitar">✕</button>`;
+      <button type="button" class="ghost danger" title="Quitar">${icon("close", 18)}</button>`;
     $("button", div).onclick = () => div.remove();
     rows.appendChild(div);
   };
@@ -388,7 +389,7 @@ async function recipeForm(recipe = null) {
 
 function importDialog() {
   openModal(`
-    <div class="modal-head"><h2>Importar receta de la casa</h2><button class="ghost" id="x">✕</button></div>
+    <div class="modal-head"><h2>Importar receta de la casa</h2><button class="m-x" id="x" aria-label="Cerrar">${icon("close")}</button></div>
     <p class="muted">Tomen una foto del cuaderno o peguen el texto. Se respetan sus cantidades;
       podrán revisar todo antes de guardar.</p>
     <form id="imp" class="stack">
@@ -428,45 +429,57 @@ async function renderPantry() {
   view.innerHTML = `
     <div class="card stack" style="margin-bottom:.75rem">
       <div class="row spread"><h2 style="margin:0">¿Qué hay en casa?</h2>
-        <button class="primary" id="scan">📷 Reconocer con una foto</button></div>
+        <div class="row"><button id="add-p">${icon("plus", 20)} Agregar</button>
+          <button class="primary" id="scan">${icon("camera", 20)} Reconocer con una foto</button></div></div>
       <datalist id="dl-units">${META.units.map((u) => `<option value="${u}">`).join("")}</datalist>
-      <form id="pf" class="row">
-        <input name="name" placeholder="Ingrediente" required style="flex:2;min-width:9rem">
-        <input name="quantity" type="number" step="any" min="0" placeholder="Cantidad" required style="width:6rem">
-        <input name="unit" list="dl-units" value="g" style="width:5.5rem">
-        <select name="category">${options(META.categories, "", "Categoría")}</select>
-        <input name="expires_on" type="date" title="Vence">
-        <button type="submit">Agregar</button>
-      </form>
       ${expiring.length ? `<div class="small"><span class="badge warn">Por vencer</span> ${esc(expiring.map((i) => i.name).join(", "))} —
         <a href="#" id="use-exp">ver qué cocinar</a></div>` : ""}
     </div>
     ${items.length ? `<div class="card table-wrap"><table>
       <thead><tr><th>Ingrediente</th><th style="width:7rem">Cantidad</th><th style="width:6rem">Unidad</th><th style="width:9.5rem">Vence</th><th style="width:6rem" title="Si baja de aquí, pasa sola a la lista de compras">Mínimo</th><th></th></tr></thead>
       <tbody>${items.map((i, idx) => `
-        ${idx === 0 || items[idx - 1].category !== i.category ? `<tr><th colspan="6">${esc(cap(i.category))}</th></tr>` : ""}
+        ${idx === 0 || items[idx - 1].category !== i.category ? `<tr class="cat"><th colspan="6">${esc(cap(i.category))}</th></tr>` : ""}
         <tr class="${i.expiring ? "expiring" : ""}" data-id="${i.id}">
           <td>${esc(i.name)} ${i.quantity <= 0 ? `<span class="badge bad">agotado</span>` : i.low ? `<span class="badge warn">poco</span>` : ""}</td>
           <td><input type="number" step="any" min="0" value="${i.quantity}" data-f="quantity"></td>
           <td><input list="dl-units" value="${esc(i.unit)}" data-f="unit"></td>
           <td><input type="date" value="${i.expires_on ?? ""}" data-f="expires_on"></td>
           <td><input type="number" step="any" min="0" value="${i.min_quantity ?? ""}" placeholder="—" data-f="min_quantity"></td>
-          <td class="row" style="flex-wrap:nowrap"><button class="ghost" data-eq="${idx}" title="Equivalencias (cuánto pesa una taza o una unidad)">⚖</button>
-            <button class="ghost danger" data-del="${i.id}" title="Quitar">✕</button></td>
+          <td class="row" style="flex-wrap:nowrap"><button class="ghost" data-eq="${idx}" title="Equivalencias (cuánto pesa una taza o una unidad)">${icon("sliders", 18)}</button>
+            <button class="ghost danger" data-del="${i.id}" title="Quitar">${icon("close", 18)}</button></td>
         </tr>`).join("")}</tbody></table></div>`
       : `<div class="empty card">La despensa está vacía. Agreguen lo que hay a mano o con una foto de la nevera.</div>`}`;
 
-  $("#pf").onsubmit = (e) => {
-    e.preventDefault();
-    const f = e.target;
-    safe(async () => {
-      await api("/api/pantry", { method: "POST", json: {
-        name: f.name.value, quantity: parseFloat(f.quantity.value), unit: f.unit.value || "unidad",
-        category: f.category.value || null, expires_on: f.expires_on.value || null,
-      } });
-      toast(`${f.name.value} agregado`);
-      renderPantry();
+  $("#add-p").onclick = () => {
+    const m = formModal({
+      title: "Agregar a la despensa",
+      body: `<form id="pf" class="stack">
+        <label class="field">Ingrediente<input name="name" required autocomplete="off" placeholder="Ej: Leche"></label>
+        <div class="form-grid">
+          <label class="field">Cantidad<input name="quantity" type="number" step="any" min="0" required></label>
+          <label class="field">Unidad<input name="unit" list="dl-units" value="unidad"></label>
+          <label class="field">Categoría<select name="category">${options(META.categories, "", "Sin categoría")}</select></label>
+          <label class="field">Vence<input name="expires_on" type="date"></label>
+          <label class="field">Mínimo (opcional)<input name="min_quantity" type="number" step="any" min="0" placeholder="Avisar si baja de…"></label>
+        </div></form>`,
+      actions: [
+        { label: "Cancelar", value: false },
+        { label: "Agregar", tone: "primary", icon: "plus", onClick: async (dlg) => {
+          const f = $("#pf", dlg);
+          if (!f.reportValidity()) return false;
+          return safe(async () => {
+            await api("/api/pantry", { method: "POST", json: {
+              name: f.name.value, quantity: parseFloat(f.quantity.value), unit: f.unit.value || "unidad",
+              category: f.category.value || null, expires_on: f.expires_on.value || null,
+              min_quantity: f.min_quantity.value === "" ? null : parseFloat(f.min_quantity.value),
+            } });
+            toast(`${f.name.value} agregado`);
+            return true;
+          }).then((ok) => ok ?? false);
+        } },
+      ],
     });
+    m.done.then((ok) => ok && renderPantry());
   };
   $("#scan").onclick = scanDialog;
   $("#use-exp")?.addEventListener("click", (e) => { e.preventDefault(); go("cook"); });
@@ -481,6 +494,8 @@ async function renderPantry() {
     toast("Actualizado");
   }));
   $$("[data-del]", view).forEach((b) => b.onclick = () => safe(async () => {
+    const name = b.closest("tr").querySelector("td").firstChild.textContent.trim();
+    if (!await confirmModal({ title: "¿Quitar de la despensa?", text: `«${esc(name)}» deja de aparecer en el inventario.`, ok: "Quitar", tone: "danger", okIcon: "trash" })) return;
     await api(`/api/pantry/${b.dataset.del}`, { method: "DELETE" });
     renderPantry();
   }));
@@ -489,7 +504,7 @@ async function renderPantry() {
 
 function equivalenceDialog(item) {
   openModal(`
-    <div class="modal-head"><h2>${esc(item.name)}</h2><button class="ghost" id="x">✕</button></div>
+    <div class="modal-head"><h2>${esc(item.name)}</h2><button class="m-x" id="x" aria-label="Cerrar">${icon("close")}</button></div>
     <p class="muted">Si sus recetas piden este ingrediente en tazas o unidades pero lo compran por peso,
       digan cuánto pesa para poder comparar y descontar bien.</p>
     <form id="eqf" class="stack">
@@ -519,7 +534,7 @@ function equivalenceDialog(item) {
 
 function scanDialog() {
   openModal(`
-    <div class="modal-head"><h2>Reconocer lo que hay</h2><button class="ghost" id="x">✕</button></div>
+    <div class="modal-head"><h2>Reconocer lo que hay</h2><button class="m-x" id="x" aria-label="Cerrar">${icon("close")}</button></div>
     <p class="muted">Foto de la nevera, la alacena o las compras. Se usan los nombres de sus recetas
       para que todo coincida; podrán corregir antes de guardar.</p>
     <form id="sf" class="row">
@@ -595,9 +610,9 @@ async function renderShopping() {
   view.innerHTML = `
     <div class="card row spread" style="margin-bottom:.75rem">
       <div class="row">
-        <button id="prev">◀</button>
+        <button id="prev" aria-label="Semana anterior">${icon("back", 20)}</button>
         <strong>Compras para la semana del ${weekStart.toLocaleDateString("es", { day: "numeric", month: "long" })}</strong>
-        <button id="next">▶</button>
+        <button id="next" aria-label="Semana siguiente">${icon("chevron", 20)}</button>
       </div>
       <div class="row">
         <button id="copy" ${list.length ? "" : "disabled"}>Copiar lista</button>
@@ -612,9 +627,9 @@ async function renderShopping() {
           <input type="checkbox" data-idx="${idx}">
           ${i.quantity != null ? `<strong>${fmtQty(i.quantity)} ${esc(fmtUnit(i.quantity, i.unit))}</strong>` : ""} ${esc(i.name)}
           <span class="muted small">— ${esc(i.recipes.length ? i.recipes.join(", ") : REASON_TEXT[i.reason])}</span>
-          ${i.extra_id ? `<button class="ghost danger" data-rm="${i.extra_id}" title="Quitar">✕</button>` : ""}
+          ${i.extra_id ? `<button class="ghost danger" data-rm="${i.extra_id}" title="Quitar">${icon("close", 18)}</button>` : ""}
         </label></li>`).join("")}</ul></div>`
-      : `<div class="empty card">No falta nada para el menú de esta semana 🎉<br>
+      : `<div class="empty card">No falta nada para el menú de esta semana.<br>
           <span class="small">(Si el menú está vacío, planéenlo primero en la pestaña Menú.)</span></div>`}`;
 
   $("#prev").onclick = () => { weekStart = addDays(weekStart, -7); refresh(); };
@@ -631,7 +646,11 @@ async function renderShopping() {
   $("#bought").onclick = () => safe(async () => {
     const checked = $$("input[data-idx]:checked", view).map((c) => list[+c.dataset.idx]);
     const items = checked.length ? checked : list;
-    if (!checked.length && !confirm("No marcaste nada. ¿Agregar toda la lista a la despensa?")) return;
+    if (!await confirmModal({
+      title: checked.length ? "¿Pasar lo marcado a la despensa?" : "¿Pasar toda la lista a la despensa?",
+      text: checked.length ? `${checked.length} productos se suman a la despensa.` : "No marcaste nada, así que se suma toda la lista.",
+      ok: "Pasar a la despensa",
+    })) return;
     await api("/api/pantry/bulk", { method: "POST", json: items.map(toPantryLine) });
     toast(`${items.length} ingredientes agregados a la despensa`);
     refresh();
@@ -653,17 +672,19 @@ async function renderHouse() {
   view.innerHTML = `
     <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(320px,1fr))">
       <section class="card stack">
+        <h2>La casa</h2>
+        <div class="row spread"><span style="font-family:var(--serif);font-size:1.3rem">${esc(META.house_name)}</span>
+          <button id="house-name">${icon("pencil", 18)} Cambiar nombre</button></div>
+        <p class="muted small" style="margin:0">Es el nombre que aparece arriba en la pantalla de la tablet.</p>
+      </section>
+      <section class="card stack">
         <h2>Personas de la casa</h2>
         <ul class="clean">${members.map((m) => `
           <li class="row spread"><span style="font-size:1.1rem">${esc(m.emoji)} ${esc(m.name)}</span>
             <span class="row"><span class="muted small">${stats.find((s) => s.id === m.id)?.done ?? 0} tareas en 30 días</span>
-            <button class="ghost danger" data-del-m="${m.id}" title="Quitar">✕</button></span></li>`).join("") || `<li class="muted">Aún no hay nadie.</li>`}
+            <button class="ghost danger" data-del-m="${m.id}" title="Quitar">${icon("close", 18)}</button></span></li>`).join("") || `<li class="muted">Aún no hay nadie.</li>`}
         </ul>
-        <form id="mf" class="row">
-          <input name="emoji" value="🙂" style="width:3.5rem;text-align:center" aria-label="Emoji">
-          <input name="name" placeholder="Nombre" required style="flex:1">
-          <button type="submit">Agregar</button>
-        </form>
+        <div><button id="add-m">${icon("plus", 20)} Agregar persona</button></div>
       </section>
       <section class="card stack">
         <h2>Gastos en compras</h2>
@@ -684,33 +705,76 @@ async function renderHouse() {
             <td><input data-f="every_days" type="number" min="1" value="${c.every_days}" style="width:5rem" title="${every(c.every_days)}"></td>
             <td><select data-f="who">${memberOpts(c.member_id, c.rotate)}</select></td>
             <td class="small">${c.is_due ? `<span class="badge warn">hoy${c.days_late ? ` (+${c.days_late})` : ""}</span>` : new Date(c.due_on + "T12:00").toLocaleDateString("es")}</td>
-            <td><button class="ghost danger" data-del-c="${c.id}" title="Quitar">✕</button></td>
+            <td><button class="ghost danger" data-del-c="${c.id}" title="Quitar">${icon("close", 18)}</button></td>
           </tr>`).join("")}</tbody></table>
-      <form id="cf" class="row">
-        <select name="emoji">${META.chore_emojis.map((e) => `<option>${e}</option>`).join("")}</select>
-        <input name="name" placeholder="Ej: Sacar la basura" required style="flex:2;min-width:10rem">
-        <label class="row small">cada <input name="every_days" type="number" min="1" value="7" style="width:4.5rem"> días</label>
-        <select name="who">${memberOpts(null, false)}</select>
-        <button type="submit" class="primary">Agregar tarea</button>
-      </form>
+      <div><button class="primary" id="add-c">${icon("plus", 20)} Agregar tarea</button></div>
     </section>`;
 
   const whoFields = (v) => v === "rotate" ? { member_id: null, rotate: true } : { member_id: v ? +v : null, rotate: false };
-  $("#mf").onsubmit = (e) => {
-    e.preventDefault();
-    safe(async () => {
-      await api("/api/members", { method: "POST", json: { name: e.target.name.value, emoji: e.target.emoji.value || "🙂" } });
-      renderHouse();
+  const FACES = ["👩", "👨", "👧", "👦", "👵", "👴", "🧑", "👶", "🧒", "🐶", "🐱", "🙂"];
+  const pickGrid = (name, list, selected) => `<div class="pick">${list.map((e) => `
+    <label><input type="radio" name="${name}" value="${e}" ${e === selected ? "checked" : ""}><span>${e}</span></label>`).join("")}</div>`;
+
+  $("#house-name").onclick = () => {
+    formModal({
+      title: "Nombre de la casa", size: "narrow",
+      body: `<label class="field">¿Cómo le dicen a su casa?<input id="hn" value="${esc(META.house_name)}" maxlength="60"></label>`,
+      actions: [
+        { label: "Cancelar", value: false },
+        { label: "Guardar", tone: "primary", icon: "check", onClick: async (dlg) => {
+          const res = await safe(() => api("/api/settings", { method: "PUT", json: { house_name: $("#hn", dlg).value } }));
+          if (!res) return false;
+          META.house_name = res.house_name;
+          document.title = `${META.house_name} · Administrar`;
+          $("#house-title").textContent = META.house_name;
+          renderHouse();
+        } },
+      ],
     });
   };
-  $("#cf").onsubmit = (e) => {
-    e.preventDefault();
-    const f = e.target;
-    safe(async () => {
-      await api("/api/chores", { method: "POST", json: {
-        name: f.name.value, emoji: f.emoji.value, every_days: +f.every_days.value || 7, ...whoFields(f.who.value),
-      } });
-      renderHouse();
+  $("#add-m").onclick = () => {
+    formModal({
+      title: "Agregar persona",
+      body: `<form id="mf" class="stack">
+        <label class="field">Nombre<input name="name" required maxlength="40" autocomplete="off" placeholder="Ej: Sofi"></label>
+        <div class="field">Su cara en la tablet${pickGrid("emoji", FACES, "🙂")}</div></form>`,
+      actions: [
+        { label: "Cancelar", value: false },
+        { label: "Agregar", tone: "primary", icon: "plus", onClick: async (dlg) => {
+          const f = $("#mf", dlg);
+          if (!f.reportValidity()) return false;
+          const ok = await safe(() => api("/api/members", { method: "POST", json: { name: f.name.value, emoji: f.emoji.value || "🙂" } }));
+          if (!ok) return false;
+          renderHouse();
+        } },
+      ],
+    });
+  };
+  $("#add-c").onclick = () => {
+    formModal({
+      title: "Nueva tarea de la casa",
+      body: `<form id="cf" class="stack">
+        <label class="field">¿Qué hay que hacer?<input name="name" required maxlength="80" autocomplete="off" placeholder="Ej: Sacar la basura"></label>
+        <div class="field">Dibujo${pickGrid("emoji", META.chore_emojis, META.chore_emojis[0])}</div>
+        <div class="form-grid">
+          <label class="field">¿Cada cuánto?<select name="every_days">
+            ${[[1, "Todos los días"], [2, "Cada 2 días"], [3, "Cada 3 días"], [7, "Cada semana"], [14, "Cada 15 días"], [30, "Cada mes"]]
+              .map(([v, t]) => `<option value="${v}" ${v === 7 ? "selected" : ""}>${t}</option>`).join("")}
+          </select></label>
+          <label class="field">¿A quién le toca?<select name="who">${memberOpts(null, false)}</select></label>
+        </div></form>`,
+      actions: [
+        { label: "Cancelar", value: false },
+        { label: "Agregar tarea", tone: "primary", icon: "plus", onClick: async (dlg) => {
+          const f = $("#cf", dlg);
+          if (!f.reportValidity()) return false;
+          const ok = await safe(() => api("/api/chores", { method: "POST", json: {
+            name: f.name.value, emoji: f.emoji.value, every_days: +f.every_days.value || 7, ...whoFields(f.who.value),
+          } }));
+          if (!ok) return false;
+          renderHouse();
+        } },
+      ],
     });
   };
   $$("tr[data-id] [data-f]", view).forEach((el) => el.onchange = () => safe(async () => {
@@ -723,12 +787,12 @@ async function renderHouse() {
     renderHouse();
   }));
   $$("[data-del-c]", view).forEach((b) => b.onclick = () => safe(async () => {
-    if (!confirm("¿Quitar esta tarea?")) return;
+    if (!await confirmModal({ title: "¿Quitar esta tarea?", text: "Se borra junto con su historial.", ok: "Quitar", tone: "danger", okIcon: "trash" })) return;
     await api(`/api/chores/${b.dataset.delC}`, { method: "DELETE" });
     renderHouse();
   }));
   $$("[data-del-m]", view).forEach((b) => b.onclick = () => safe(async () => {
-    if (!confirm("¿Quitar a esta persona?")) return;
+    if (!await confirmModal({ title: "¿Quitar a esta persona?", text: "Sus tareas quedan para cualquiera.", ok: "Quitar", tone: "danger", okIcon: "trash" })) return;
     await api(`/api/members/${b.dataset.delM}`, { method: "DELETE" });
     renderHouse();
   }));
@@ -740,6 +804,9 @@ async function renderHouse() {
   await safe(async () => {
     META = await api("/api/meta");
     $("#household").value = META.household_size;
+    $("#house-title").textContent = META.house_name;
+    $("#home-link").innerHTML = `${icon("home", 20)} Casa`;
+    document.title = `${META.house_name} · Administrar`;
     go("menu");
   });
 })();

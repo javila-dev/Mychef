@@ -104,6 +104,20 @@ cambiar con `MYCHEF_MODEL` (por defecto `claude-opus-5`). Las solicitudes activa
 *fallback* del lado del servidor (`fallbacks: "default"`), así que si el modelo principal
 declina una solicitud, la API la reintenta con otro modelo automáticamente.
 
+## Diseño
+
+- **Colores**: verde huerta como color principal, fondo de papel de lino, y acentos en miel, terracota
+  y salvia. Tiene modo oscuro automático (útil de noche en la tablet).
+- **Letras**: *Fraunces* para títulos (una serif cálida, de recetario) y *Atkinson Hyperlegible*
+  para el texto, diseñada para leerse fácil. Ambas vienen incluidas en `static/fonts/` (licencia SIL OFL),
+  así que funcionan aunque la tablet no tenga internet.
+- **Íconos** dibujados para la app, en lugar de emojis genéricos en los botones.
+- Las **confirmaciones y formularios** se abren en ventanas (modales) que se cierran con la X,
+  con Esc o tocando fuera; nunca con los cuadros de diálogo del navegador.
+- Las cantidades se muestran como en la cocina: "½ taza", "1 ⅓ unidades".
+- En ⚙️ Administrar → Casa y tareas se le puede poner **nombre a la casa** ("Casa Ávila"), que aparece
+  en la pantalla de la tablet.
+
 ## Desarrollo
 
 ```bash
@@ -123,7 +137,8 @@ app/
   units.py     Unidades y conversiones
   vision.py    Reconocimiento con Claude (facturas, despensa y recetas)
   seed.py      Datos de ejemplo
-static/        index.html + hub.js: pantalla de la casa · admin.html + admin.js: Administrar
+static/        index.html + hub.js/hub.css: pantalla de la casa · admin.html + admin.js: Administrar
+               common.js: íconos, modales y utilidades · styles.css: identidad visual · fonts/
 tests/         Pruebas
 ```
 

@@ -162,7 +162,8 @@ class IngredientUpdate(BaseModel):
 
 
 class SettingsIn(BaseModel):
-    household_size: int = Field(ge=1, le=50)
+    household_size: int | None = Field(None, ge=1, le=50)
+    house_name: str | None = Field(None, max_length=60)
 
 
 def _validate_meals(meals: list[str]) -> list[str]:
@@ -220,6 +221,7 @@ def meta(session: Session = SessionDep):
         "categories": INGREDIENT_CATEGORIES,
         "units": list(UNITS),
         "household_size": services.household_size(session),
+        "house_name": _house_name(session),
         "vision_model": vision.MODEL,
         "chore_emojis": CHORE_EMOJIS,
     }
@@ -237,9 +239,17 @@ def login(data: PinIn, request: Request):
 
 @app.put("/api/settings")
 def update_settings(data: SettingsIn, session: Session = SessionDep):
-    session.merge(Setting(key="household_size", value=str(data.household_size)))
+    if data.household_size is not None:
+        session.merge(Setting(key="household_size", value=str(data.household_size)))
+    if data.house_name is not None:
+        session.merge(Setting(key="house_name", value=data.house_name.strip()))
     session.commit()
-    return {"household_size": data.household_size}
+    return {"household_size": services.household_size(session), "house_name": _house_name(session)}
+
+
+def _house_name(session: Session) -> str:
+    s = session.get(Setting, "house_name")
+    return s.value if s and s.value else "Nuestra casa"
 
 
 @app.get("/api/ingredients")

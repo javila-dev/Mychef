@@ -3,13 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#2f6b45">
   <title>MyChef · Administrar</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍲</text></svg>">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
   <header class="topbar">
-    <div class="row"><a class="btn" href="/" title="Volver a la pantalla de la casa">🏠 Casa</a><h1>Administrar</h1></div>
+    <div class="brand">
+      <a class="btn" href="/" title="Volver a la pantalla de la casa" id="home-link">Casa</a>
+      <h1><span id="house-title">Nuestra casa</span><small>Administrar</small></h1>
+    </div>
     <label class="household">Personas en casa
       <input id="household" type="number" min="1" max="50" value="4">
     </label>

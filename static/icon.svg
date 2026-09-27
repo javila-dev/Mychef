@@ -1,1 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#c2562b"/><text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" font-size="300">🏠</text></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="120" fill="#2f6b45"/>
+  <g fill="none" stroke="#fffdf7" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M112 244 256 132l144 112"/>
+    <path d="M148 218v164h216V218"/>
+    <path d="M226 382v-86h60v86"/>
+  </g>
+  <path d="M300 190c0-38 26-62 70-64 0 44-24 70-62 70" fill="#9dc48f"/>
+</svg>
