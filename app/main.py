@@ -165,6 +165,7 @@ class CookIn(BaseModel):
 
 class IngredientUpdate(BaseModel):
     category: str | None = None
+    staple: bool | None = None  # básico que siempre hay
     g_per_cup: float | None = Field(None, gt=0)  # cuánto pesa 1 taza (240 ml)
     g_per_unit: float | None = Field(None, gt=0)  # cuánto pesa 1 unidad
 
@@ -173,6 +174,7 @@ class SettingsIn(BaseModel):
     household_size: int | None = Field(None, ge=1, le=50)
     house_name: str | None = Field(None, max_length=60)
     wake_word: str | None = Field(None, max_length=40)
+    inventory_mode: str | None = None
 
 
 def _validate_meals(meals: list[str]) -> list[str]:
@@ -232,6 +234,7 @@ def meta(session: Session = SessionDep):
         "household_size": services.household_size(session),
         "house_name": _house_name(session),
         "wake_word": _wake_word(session),
+        "inventory_mode": services.inventory_mode(session),
         "vision_model": vision.MODEL,
         "chore_emojis": CHORE_EMOJIS,
     }
@@ -258,11 +261,16 @@ def update_settings(data: SettingsIn, session: Session = SessionDep):
         if len(word) < 3:
             raise HTTPException(422, "La palabra de activación es muy corta. Usen dos palabras, como «Oye casa».")
         session.merge(Setting(key="wake_word", value=word))
+    if data.inventory_mode is not None:
+        if data.inventory_mode not in services.INVENTORY_MODES:
+            raise HTTPException(422, "Modo de inventario desconocido.")
+        session.merge(Setting(key="inventory_mode", value=data.inventory_mode))
     session.commit()
     return {
         "household_size": services.household_size(session),
         "house_name": _house_name(session),
         "wake_word": _wake_word(session),
+        "inventory_mode": services.inventory_mode(session),
     }
 
 
@@ -276,14 +284,18 @@ def _house_name(session: Session) -> str:
     return s.value if s and s.value else "Nuestra casa"
 
 
+def _ingredient_out(ing: Ingredient) -> dict:
+    return {**ing.model_dump(), "is_staple": ing.is_staple}
+
+
 @app.get("/api/ingredients")
 def list_ingredients(session: Session = SessionDep):
-    return session.exec(select(Ingredient).order_by(Ingredient.name)).all()
+    return [_ingredient_out(i) for i in session.exec(select(Ingredient).order_by(Ingredient.name))]
 
 
 @app.patch("/api/ingredients/{ingredient_id}")
 def update_ingredient(ingredient_id: int, data: IngredientUpdate, session: Session = SessionDep):
-    """Equivalencias de la casa: p. ej. 1 taza de arroz = 200 g, 1 zanahoria = 80 g."""
+    """Equivalencias de la casa (1 taza de arroz = 200 g) y si es un básico que siempre hay."""
     ing = session.get(Ingredient, ingredient_id)
     if not ing:
         raise HTTPException(404, "Ingrediente no encontrado")
@@ -294,9 +306,26 @@ def update_ingredient(ingredient_id: int, data: IngredientUpdate, session: Sessi
         ing.g_per_ml = fields["g_per_cup"] / 240 if fields["g_per_cup"] else None
     if "g_per_unit" in fields:
         ing.g_per_unit = fields["g_per_unit"]
+    if "staple" in fields:
+        ing.staple = fields["staple"]
     session.commit()
     session.refresh(ing)
-    return ing
+    return _ingredient_out(ing)
+
+
+class StapleIn(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    staple: bool = True
+
+
+@app.post("/api/staples")
+def set_staple(data: StapleIn, session: Session = SessionDep):
+    """Marca (o desmarca) por nombre un básico que siempre hay; lo crea si no existe."""
+    ing = services.get_or_create_ingredient(session, data.name.strip())
+    ing.staple = data.staple
+    session.commit()
+    session.refresh(ing)
+    return _ingredient_out(ing)
 
 
 # ---------------------------------------------------------------- recetas
@@ -425,22 +454,49 @@ def delete_pantry(item_id: int, session: Session = SessionDep):
         session.commit()
 
 
+# Qué se suele guardar en cada lugar, para preguntar por lo que no salió en la foto.
+PLACE_CATEGORIES = {
+    "nevera": {"verduras", "frutas", "carnes", "pescados", "lácteos y huevos", "congelados"},
+    "alacena": {"granos y harinas", "legumbres", "enlatados", "aceites y salsas", "panadería", "bebidas"},
+}
+
+
 @app.post("/api/pantry/scan")
-async def scan_pantry(photo: UploadFile = File(...), session: Session = SessionDep):
-    """Reconoce lo que hay en una foto. No guarda nada: la familia confirma primero."""
+async def scan_pantry(
+    photos: list[UploadFile] | None = File(None),
+    photo: UploadFile | None = File(None),
+    place: str = Form("nevera"),
+    session: Session = SessionDep,
+):
+    """Reconoce lo que hay en una o varias fotos. No guarda nada: la familia confirma primero."""
     known = [i.name for i in session.exec(select(Ingredient))]
-    data = await photo.read()
+    uploads = [*(photos or []), *([photo] if photo else [])]
+    images = [(await p.read(), p.content_type or "") for p in uploads][:6]
     try:
-        result = vision.detect_pantry(data, photo.content_type or "", known)
+        result = vision.detect_pantry(images, known, place)
     except vision.VisionError as e:
         raise HTTPException(e.status, str(e)) from e
     keys = {services.ingredient_key(n) for n in known}
+    seen = {services.ingredient_key(i.name) for i in result.items}
+    categories = set(INGREDIENT_CATEGORIES)
+    # Lo que según el inventario debería estar en ese lugar y no apareció: ¿se acabó?
+    not_seen = [
+        {"name": p.ingredient.name, "quantity": p.quantity, "unit": p.unit}
+        for p in session.exec(select(PantryItem).where(PantryItem.quantity > 0))
+        if p.ingredient.category in PLACE_CATEGORIES.get(place, set())
+        and p.ingredient.key not in seen and not p.ingredient.is_staple
+    ]
     return {
         "notes": result.notes,
         "items": [
-            {**i.model_dump(), "known": services.ingredient_key(i.name) in keys}
+            {
+                **i.model_dump(),
+                "category": i.category if i.category in categories else "otros",
+                "known": services.ingredient_key(i.name) in keys,
+            }
             for i in result.items
         ],
+        "not_seen": sorted(not_seen, key=lambda x: x["name"]),
     }
 
 

@@ -36,6 +36,15 @@ def ingredient_key(name: str) -> str:
     return " ".join(words)
 
 
+# Básicos de cocina: se asume que siempre hay (salvo que la casa diga lo contrario).
+STAPLE_CATEGORY = "especias y condimentos"
+STAPLE_NAMES = [
+    "sal", "azúcar", "aceite", "aceite vegetal", "aceite de oliva", "agua", "pimienta", "pimienta negra",
+    "comino", "orégano", "laurel", "tomillo", "canela", "paprika", "color", "achiote", "sazón",
+    "vinagre", "bicarbonato", "polvo de hornear", "caldo de gallina", "caldo de pollo", "cubo de caldo", "ajo en polvo",
+]
+
+
 class Ingredient(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
@@ -45,6 +54,14 @@ class Ingredient(SQLModel, table=True):
     # Equivalencias propias de la casa para comparar tazas/unidades con gramos
     g_per_ml: Optional[float] = None  # 1 taza (240 ml) de arroz = 200 g -> 0.833
     g_per_unit: Optional[float] = None  # 1 zanahoria = 80 g
+    # ¿Básico que siempre hay? None = automático (condimentos y la lista STAPLE_NAMES)
+    staple: Optional[bool] = None
+
+    @property
+    def is_staple(self) -> bool:
+        if self.staple is not None:
+            return self.staple
+        return self.category == STAPLE_CATEGORY or self.key in STAPLE_KEYS
 
     def convert(self, quantity: float, from_unit: str, to_unit: str) -> Optional[float]:
         return convert_with(quantity, from_unit, to_unit, self.g_per_ml, self.g_per_unit)
@@ -194,3 +211,6 @@ class FamilyPhoto(SQLModel, table=True):
     filename: str
     caption: str = ""
     created_at: dt.datetime = Field(default_factory=utcnow)
+
+
+STAPLE_KEYS = {ingredient_key(n) for n in STAPLE_NAMES}

@@ -272,6 +272,10 @@ def _rules(session: Session, t: str, ctx: dict, today: dt.date, o: str | None = 
         return VoiceResult("navigate", "", navigate={"screen": "home"})
     if re.search(r"\b(escanear|escanea|leer|lee) (la |una )?factura\b|^factura$", t):
         return VoiceResult("navigate", "Abro para escanear la factura.", navigate={"screen": "receipt"})
+    m = re.search(r"\b(escanear|escanea|foto( a| de)?|tomale una foto a|revisa|revisar|mira|mirar|reconoce) (a )?(la |el )?(nevera|alacena|despensa|refri|refrigerador|congelador)\b", t)
+    if m:
+        place = "alacena" if m.group(5) in ("alacena", "despensa") else "nevera"
+        return VoiceResult("navigate", f"Abro para tomarle foto a la {place}.", navigate={"screen": "fridge", "place": place})
     if re.search(r"^(abre |ver |muestra )?(la )?lista( de compras| de mercado)?$", t):
         return VoiceResult("navigate", "", navigate={"screen": "shopping"})
     if re.search(r"^(abre |ver |muestra )?(las )?(tareas|oficios)$", t):

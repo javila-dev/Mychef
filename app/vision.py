@@ -134,10 +134,16 @@ def _parse(content: list[dict], output_format: type[BaseModel], effort: str | No
     return response.parsed_output
 
 
-def detect_pantry(data: bytes, media_type: str, known_ingredients: list[str]) -> PantryDetection:
+def detect_pantry(
+    images: list[tuple[bytes, str]], known_ingredients: list[str], place: str = "nevera"
+) -> PantryDetection:
     known = ", ".join(sorted(known_ingredients)) or "(todavía no hay ingredientes registrados)"
-    prompt = f"""Esta es una foto de la nevera, alacena o compras de una familia. \
-Lista los alimentos e ingredientes que se ven, estimando la cantidad de cada uno.
+    where = {"nevera": "la nevera (puede incluir la puerta y el congelador)", "alacena": "la alacena o despensa"}.get(
+        place, "la nevera, alacena o compras"
+    )
+    fotos = "Estas fotos son" if len(images) > 1 else "Esta foto es"
+    prompt = f"""{fotos} de {where} de una familia. \
+Lista los alimentos e ingredientes que se ven, estimando cuánto QUEDA de cada uno.
 
 Ingredientes que esta familia ya usa en sus recetas: {known}.
 Si reconoces uno de ellos, usa exactamente ese nombre para que coincida con sus recetas. \
@@ -146,11 +152,19 @@ Si es algo nuevo, usa un nombre corto en español y en singular (p. ej. "tomate"
 Reglas:
 - unit: una de {UNITS_HINT}. Prefiere "unidad" para cosas que se cuentan (huevos, limones) \
 y g/ml cuando la etiqueta o el envase deja ver el peso o volumen.
+- Envases abiertos: estima lo que queda (una caja de leche de 1 l a la mitad = 500 ml).
+- Si varias fotos muestran lo mismo (p. ej. la nevera y su puerta), no lo cuentes dos veces.
+- Recipientes cerrados u opacos (tuppers, bolsas sin rótulo): inclúyelos solo si se adivina qué son, \
+con confidence "baja". No incluyas platos ya preparados como ingredientes.
 - category: una de {", ".join(INGREDIENT_CATEGORIES)}.
 - confidence: "alta" si se ve con claridad, "media" si lo deduces del envase, "baja" si es una suposición.
 - No inventes cosas que no se vean. Agrupa artículos iguales en una sola línea.
 - notes: una frase corta sobre lo que no se pudo identificar bien (o vacío)."""
-    return _parse([_image_block(data, media_type), {"type": "text", "text": prompt}], PantryDetection)
+    if not images:
+        raise VisionError("Envíen al menos una foto.", 400)
+    content = [_image_block(data, media_type) for data, media_type in images]
+    content.append({"type": "text", "text": prompt})
+    return _parse(content, PantryDetection)
 
 
 def parse_recipe(

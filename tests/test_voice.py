@@ -141,6 +141,8 @@ def test_open_recipe_and_cook_mode(client):
 def test_navigation_help_and_unknown(client):
     assert say(client, "volver al inicio")["navigate"] == {"screen": "home"}
     assert say(client, "escanear factura")["navigate"] == {"screen": "receipt"}
+    assert say(client, "escanea la nevera")["navigate"] == {"screen": "fridge", "place": "nevera"}
+    assert say(client, "tómale una foto a la alacena")["navigate"] == {"screen": "fridge", "place": "alacena"}
     assert say(client, "ayuda")["intent"] == "help"
     r = say(client, "blablá tralalá")
     assert r["intent"] == "unknown" and "Pueden decir" in r["speak"]

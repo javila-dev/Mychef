@@ -266,6 +266,15 @@ body.at-home #toast.show { transform: translateY(0); }
 .rline .amt { display: flex; gap: .3rem; }
 .rline .amt input { width: 5rem; padding: .4rem .5rem; font-size: 1rem; border-radius: 12px; }
 .rline .price { font-weight: 500; min-width: 5.5rem; text-align: right; font-variant-numeric: tabular-nums; }
+.choices { display: grid; gap: .7rem; }
+.choice {
+  display: flex !important; align-items: center; gap: 1rem; text-align: left; justify-content: flex-start !important;
+  padding: 1rem 1.2rem !important; border-radius: 20px !important; background: var(--paper-2) !important;
+  border-color: transparent !important; color: var(--green-ink) !important; min-height: 84px;
+}
+.choice:hover { background: var(--green-mist) !important; }
+.choice b { display: block; color: var(--ink); font-size: 1.15rem; font-weight: 600; }
+.choice small { color: var(--muted); font-size: .95rem; }
 .group-label { font-weight: 600; color: var(--muted); margin: 1.1rem 0 .2rem; font-size: .95rem; }
 
 .gallery { display: grid; gap: .6rem; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }

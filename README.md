@@ -20,13 +20,32 @@ pocas palabras, siempre un **← Volver**, y si nadie la toca por 2 minutos vuel
 - **Tareas de hoy**: sacar la basura, lavar la loza, regar las plantas… Se toca ✓, se elige
   **¿quién lo hizo?** y listo. Tocar de nuevo deshace. Las tareas por turnos pasan solas a la siguiente persona.
 - **Ojo con esto**: lo que se vence pronto y lo que se está acabando.
-- **🧾 Escanear factura**: foto de la factura del mercado (si es larga, en varias fotos). La IA entiende
+- **🧾 Escanear → La factura**: foto de la factura del mercado (si es larga, en varias fotos). La IA entiende
   los nombres abreviados ("LCHE ALQ 1100ML X2" → Leche, 2200 ml), separa comida de aseo, y se revisa con
   un toque antes de guardar. Todo queda en el inventario y se registra cuánto se gastó.
 - **🛒 Lista de compras**: lo que falta para el menú de la semana + lo que bajó de su mínimo + lo que
   anotaron a mano. En el supermercado se va marcando ✓ (funciona igual desde el celular).
 - **🍳 ¿Qué cocino?**: sus recetas que se pueden hacer ya, aprovechando lo que se vence.
 - **🫙 Se acabó algo**: se toca el producto y queda anotado en la lista.
+- **📷 Escanear → La nevera / La alacena**: una o varias fotos (la nevera, la puerta, el congelador).
+  La IA dice qué ve y **cuánto queda** (la leche a la mitad = 500 ml); se revisa y se toca **Poner al día**.
+  Lo que según el inventario debía estar y no salió en la foto aparece como «¿Se acabó?»: al tocarlo pasa
+  a la lista de compras. También por voz: «Oye casa, escanea la nevera».
+
+### Qué tan exigente es con lo que hay
+
+En **Administrar → Despensa** se elige:
+
+| Modo | Cuándo dice «se puede hacer» |
+|---|---|
+| **Tranquilo** | Si hay algo de cada ingrediente, alcanza. Para quienes no quieren llevar la cuenta. |
+| **Normal** (por defecto) | Si hay al menos ¾ de lo que pide la receta («hay, justo»). |
+| **Exacto** | Solo si alcanza gramo a gramo, sin dar nada por hecho. |
+
+En Tranquilo y Normal, los **básicos que siempre hay** (sal, aceite, azúcar, agua, condimentos…) no
+hace falta tenerlos en el inventario ni se piden en la lista de compras; solo llegan a la lista si alguien
+dice «se acabó la sal». La lista de básicos se ajusta en la misma pestaña. La lista de compras, en esos
+modos, solo pide algo cuando falta más de una cuarta parte.
 
 ### ⚙️ Administrar (`/admin`) — para cargar y ajustar
 

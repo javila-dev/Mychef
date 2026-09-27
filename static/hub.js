@@ -225,8 +225,8 @@ async function renderHome() {
       </div>
 
       <nav class="actions" aria-label="Qué quieren hacer">
-        <button class="act act-scan" data-act="receipt">${icon("receipt", 34)}
-          <span><span class="label">Escanear factura</span><span class="hint">Una foto y queda todo guardado</span></span></button>
+        <button class="act act-scan" data-act="scan">${icon("camera", 34)}
+          <span><span class="label">Escanear</span><span class="hint">La factura o la nevera</span></span></button>
         <button class="act act-list" data-act="shopping">${icon("basket", 34)}
           ${t.shopping_count ? `<span class="count" aria-label="${t.shopping_count} por comprar">${t.shopping_count}</span>` : ""}
           <span><span class="label">Lista de compras</span><span class="hint">${listHint}</span></span></button>
@@ -241,7 +241,7 @@ async function renderHome() {
     </div>`;
 
   const ACTS = {
-    receipt: receiptModal, shopping: () => go("shopping"), what: () => go("what"),
+    scan: scanChooser, receipt: receiptModal, shopping: () => go("shopping"), what: () => go("what"),
     ranout: ranOutModal, chores: () => go("chores"), photos: photosModal,
   };
   $$("[data-act]", app).forEach((b) => b.onclick = () => ACTS[b.dataset.act]());
@@ -489,6 +489,134 @@ function receiptModal() {
   photos();
 }
 
+// ---------------------------------------------------------------- escanear: factura o nevera
+
+function scanChooser() {
+  const m = modal({
+    title: "¿Qué van a escanear?", size: "narrow",
+    body: `<div class="choices">
+      <button class="choice" data-c="receipt">${icon("receipt", 36)}<span><b>La factura del mercado</b><small>Suma lo que compraron</small></span></button>
+      <button class="choice" data-c="nevera">${icon("fridge", 36)}<span><b>La nevera</b><small>Pone al día lo que hay</small></span></button>
+      <button class="choice" data-c="alacena">${icon("jar", 36)}<span><b>La alacena</b><small>Granos, enlatados, aceites…</small></span></button>
+    </div>`,
+  });
+  $$("[data-c]", m.el).forEach((b) => b.onclick = () => {
+    m.close();
+    b.dataset.c === "receipt" ? receiptModal() : fridgeModal(b.dataset.c);
+  });
+}
+
+// Fotos de la nevera o la alacena: la IA dice qué ve y cuánto queda; la familia revisa y guarda.
+function fridgeModal(place = "nevera") {
+  const where = place === "alacena" ? "la alacena" : "la nevera";
+  const state = { photos: [], draft: null, gone: new Set() };
+  const m = modal({ title: `Foto de ${where}`, size: "wide", body: `<div id="fr"></div>` });
+  const box = $("#fr", m.el);
+  busy = true;
+  m.done.then(() => { busy = false; });
+
+  const photos = () => {
+    const n = state.photos.length;
+    box.innerHTML = `
+      <input type="file" id="cam" accept="image/*" capture="environment" hidden>
+      ${n === 0 ? `
+        <label class="shoot" for="cam">${icon("camera", 48)}Tomar foto de ${where}
+          <small>Con la puerta bien abierta y buena luz. Si no cabe, tomen varias.</small></label>` : `
+        <div class="thumbs">${state.photos.map((p, i) => `<img src="${URL.createObjectURL(p)}" alt="Foto ${i + 1}">`).join("")}</div>
+        <p class="muted" style="margin-top:0">${place === "nevera" ? "¿Falta la puerta, los cajones o el congelador?" : "¿Falta algún estante?"} Tomen otra foto.</p>
+        <div class="row">
+          <button class="primary big" id="read">${icon("check")} Ver qué hay</button>
+          ${n < 6 ? `<label class="btn big" for="cam" role="button">${icon("plus")} Otra foto</label>` : ""}
+          <button class="ghost big" id="restart">${icon("undo")} Empezar de nuevo</button>
+        </div>`}`;
+    $("#cam", box).onchange = async (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      state.photos.push(await compressImage(f));
+      photos();
+    };
+    $("#restart", box)?.addEventListener("click", () => { state.photos = []; photos(); });
+    $("#read", box)?.addEventListener("click", read);
+  };
+
+  const read = async () => {
+    box.innerHTML = `<div class="loading" role="status">${icon("fridge", 52)}
+      <p><b>Mirando ${where}…</b></p><p class="muted">Toma unos segundos. No hay que tocar nada.</p></div>`;
+    try {
+      const fd = new FormData();
+      state.photos.forEach((p) => fd.append("photos", p));
+      fd.append("place", place);
+      const d = await api("/api/pantry/scan", { method: "POST", body: fd });
+      d.items.forEach((i) => { i.keep = i.confidence !== "baja"; });
+      state.draft = d;
+      review();
+    } catch (e) {
+      box.innerHTML = `<div class="done-msg"><div class="mark warn">${icon("warn", 44)}</div>
+        <h2>No se pudo ver</h2><p class="muted">${esc(e.message)}</p>
+        <div class="row" style="justify-content:center;margin-top:1rem"><button class="primary big" id="retry">Intentar otra vez</button></div></div>`;
+      $("#retry", box).onclick = () => { state.photos = []; photos(); };
+    }
+  };
+
+  const review = () => {
+    const d = state.draft;
+    const kept = d.items.filter((i) => i.keep).length;
+    const sure = { alta: "", media: "", baja: `<span class="badge warn">¿seguro?</span>` };
+    box.innerHTML = `
+      <p class="muted" style="margin:0 0 .4rem">Esto es lo que se ve y cuánto queda. Toquen el círculo para quitar lo que no sea,
+        y corrijan lo que haga falta. ${d.notes ? `<br>${esc(d.notes)}` : ""}</p>
+      ${d.items.map((i, idx) => `
+        <div class="rline ${i.keep ? "on" : "off"}" data-idx="${idx}">
+          <button class="circle" data-toggle aria-label="${i.keep ? "No guardar" : "Guardar"}">${i.keep ? icon("check", 22) : ""}</button>
+          <div class="who"><input class="nm" value="${esc(i.name)}" data-f="name" aria-label="Nombre"></div>
+          <div class="amt"><input type="number" step="any" min="0" value="${i.quantity}" data-f="quantity" aria-label="Cantidad">
+            <input value="${esc(i.unit)}" data-f="unit" aria-label="Unidad"></div>
+          <span class="price">${sure[i.confidence] ?? ""}</span>
+        </div>`).join("") || `<p class="empty-note">No se reconocieron alimentos en la foto.</p>`}
+      ${d.not_seen?.length ? `
+        <div class="group-label">No se ve en la foto. ¿Se acabó? Tóquenlo y pasa a la lista de compras</div>
+        <div class="tiles">${d.not_seen.map((n) => `
+          <button class="tile ${state.gone.has(n.name) ? "done" : ""}" data-gone="${esc(n.name)}">${state.gone.has(n.name) ? icon("check", 20) : ""}${esc(n.name)}</button>`).join("")}</div>` : ""}
+      <div class="row" style="margin-top:1.2rem">
+        <button class="primary big" id="save" ${kept || state.gone.size ? "" : "disabled"}>${icon("check")} Poner al día ${kept} cosa${kept === 1 ? "" : "s"}</button>
+        <button class="ghost big" id="again">${icon("camera")} Tomar otra foto</button>
+      </div>`;
+    $$("[data-toggle]", box).forEach((b) => b.onclick = () => {
+      const i = d.items[+b.closest(".rline").dataset.idx];
+      i.keep = !i.keep;
+      review();
+    });
+    $$("[data-f]", box).forEach((inp) => inp.onchange = () => {
+      const i = d.items[+inp.closest(".rline").dataset.idx];
+      i[inp.dataset.f] = inp.dataset.f === "quantity" ? parseFloat(inp.value) || 0 : inp.value;
+    });
+    $$("[data-gone]", box).forEach((b) => b.onclick = () => {
+      const n = b.dataset.gone;
+      state.gone.has(n) ? state.gone.delete(n) : state.gone.add(n);
+      review();
+    });
+    $("#again", box).onclick = () => { state.photos = []; state.draft = null; state.gone.clear(); photos(); };
+    $("#save", box).onclick = (e) => safe(async () => {
+      const items = d.items.filter((i) => i.keep && i.name.trim());
+      await withBusy(e.currentTarget, async () => {
+        // La foto muestra lo que QUEDA: se reemplaza la cantidad, no se suma.
+        if (items.length) {
+          await api("/api/pantry/bulk", { method: "POST", json: items.map((i) => ({
+            name: i.name.trim(), quantity: i.quantity, unit: i.unit || "unidad", category: i.category, replace: true,
+          })) });
+        }
+        for (const name of state.gone) await api("/api/shopping/ran-out", { method: "POST", json: { name } });
+      });
+      m.close();
+      const gone = state.gone.size ? ` ${state.gone.size} pasaron a la lista de compras.` : "";
+      await doneModal("¡Al día!", `${items.length} cosa${items.length === 1 ? "" : "s"} de ${where} quedaron actualizadas.${gone}`);
+      refresh();
+    });
+  };
+
+  photos();
+}
+
 // ---------------------------------------------------------------- se acabó algo (en una ventana)
 
 async function ranOutModal() {
@@ -637,7 +765,8 @@ async function renderWhat({ meal } = {}) {
 // ---------------------------------------------------------------- modo cocina
 
 const STATUS = {
-  ok: ["check", "st-ok", "Hay"], hay: ["check", "st-ok", "Hay"],
+  ok: ["check", "st-ok", "Hay"], hay: ["check", "st-ok", "Hay"], justo: ["check", "st-ok", "Hay, justo"],
+  basico: ["check", "st-basic", "Básico: se da por hecho que hay"],
   poco: ["dot", "st-poco", "No alcanza"], falta: ["close", "st-falta", "No hay"],
 };
 
@@ -999,6 +1128,7 @@ async function handleVoiceText(text, { box = null, handsFree: hf = false } = {})
   const speaking = say(res.speak);
   if (nav) {
     if (nav.screen === "receipt") receiptModal();
+    else if (nav.screen === "fridge") fridgeModal(nav.place);
     else if (nav.screen === "photos") photosModal();
     else if (nav.screen === "cook") go("cook", { recipeId: nav.recipeId });
     else if (nav.screen === "what") go("what", nav.meal ? { meal: nav.meal } : {});

@@ -158,7 +158,7 @@ def test_scan_pantry_uses_household_names(client, monkeypatch):
     client.post("/api/recipes", json=arroz_con_pollo())
     seen = {}
 
-    def fake_detect(data, media_type, known):
+    def fake_detect(images, known, place="nevera"):
         seen["known"] = known
         return vision.PantryDetection(notes="", items=[
             vision.DetectedItem(name="Zanahorias", quantity=3, unit="unidad", category="verduras", confidence="alta"),
@@ -193,6 +193,7 @@ def test_index_served(client):
 
 
 def test_equivalences_compare_cups_with_kilos(client):
+    client.put("/api/settings", json={"inventory_mode": "exacto"})
     r = client.post("/api/recipes", json={
         "name": "Arroz blanco", "meal_types": ["almuerzo"], "servings": 4,
         "ingredients": [{"name": "Arroz", "quantity": 2, "unit": "taza"}],
@@ -216,3 +217,79 @@ def test_equivalences_compare_cups_with_kilos(client):
     entry = client.get("/api/menu", params={"start": MONDAY.isoformat()}).json()[0]
     changes = client.post(f"/api/menu/{entry['id']}/cook").json()["pantry_changes"]
     assert changes[0]["after"] == 0  # descontó en kg aunque la receta está en tazas
+
+
+def _arroz_con_sal(client):
+    r = client.post("/api/recipes", json={
+        "name": "Arroz de la casa", "meal_types": ["almuerzo"], "servings": 4,
+        "ingredients": [
+            {"name": "Arroz", "quantity": 1000, "unit": "g"},
+            {"name": "Sal", "quantity": 10, "unit": "g"},
+            {"name": "Aceite", "quantity": 30, "unit": "ml"},
+        ],
+    }).json()
+    client.post("/api/pantry", json={"name": "Arroz", "quantity": 800, "unit": "g"})
+    return r
+
+
+def _statuses(client, rid):
+    a = client.get(f"/api/recipes/{rid}").json()["availability"]
+    return a["can_cook"], {i["name"]: i["status"] for i in a["items"]}
+
+
+def test_inventory_modes(client):
+    r = _arroz_con_sal(client)
+    # Por defecto (normal): sal y aceite se asumen, 800 de 1000 g de arroz alcanza "justo".
+    assert client.get("/api/meta").json()["inventory_mode"] == "normal"
+    assert _statuses(client, r["id"]) == (True, {"Arroz": "justo", "Sal": "basico", "Aceite": "basico"})
+
+    client.put("/api/settings", json={"inventory_mode": "exacto"})
+    assert _statuses(client, r["id"]) == (False, {"Arroz": "poco", "Sal": "falta", "Aceite": "falta"})
+
+    client.put("/api/settings", json={"inventory_mode": "tranquilo"})
+    client.patch(f"/api/pantry/{client.get('/api/pantry').json()[0]['id']}", json={"quantity": 100})
+    assert _statuses(client, r["id"])[0] is True  # hay algo de arroz: se puede
+
+    assert client.put("/api/settings", json={"inventory_mode": "loco"}).status_code == 422
+
+
+def test_staples_can_be_changed(client):
+    r = _arroz_con_sal(client)
+    sal = next(i for i in client.get("/api/ingredients").json() if i["name"] == "Sal")
+    assert sal["is_staple"] is True
+    client.patch(f"/api/ingredients/{sal['id']}", json={"staple": False})
+    assert _statuses(client, r["id"]) == (False, {"Arroz": "justo", "Sal": "falta", "Aceite": "basico"})
+    # Marcar por nombre algo que no es básico por defecto
+    assert client.post("/api/staples", json={"name": "cebolla"}).json()["is_staple"] is True
+
+
+def test_shopping_list_is_lenient_in_normal_mode(client):
+    r = _arroz_con_sal(client)
+    client.post("/api/menu", json={"day": MONDAY.isoformat(), "meal_type": "almuerzo", "recipe_id": r["id"], "servings": 4})
+    names = lambda: [i["name"] for i in client.get("/api/shopping-list", params={"start": MONDAY.isoformat()}).json()]
+    assert names() == []  # 80 % del arroz alcanza y los básicos no se piden
+    client.put("/api/settings", json={"inventory_mode": "exacto"})
+    assert sorted(names()) == ["Aceite", "Arroz", "Sal"]
+
+
+def test_fridge_scan_several_photos_and_not_seen(client, monkeypatch):
+    client.post("/api/pantry", json={"name": "Leche", "quantity": 1, "unit": "l", "category": "lácteos y huevos"})
+    client.post("/api/pantry", json={"name": "Queso", "quantity": 250, "unit": "g", "category": "lácteos y huevos"})
+    got = {}
+
+    def fake_detect(images, known, place="nevera"):
+        got["n"], got["place"] = len(images), place
+        return vision.PantryDetection(notes="", items=[
+            vision.DetectedItem(name="Leche", quantity=500, unit="ml", category="lácteos y huevos", confidence="alta"),
+        ])
+
+    monkeypatch.setattr(vision, "detect_pantry", fake_detect)
+    res = client.post("/api/pantry/scan", data={"place": "nevera"}, files=[
+        ("photos", ("a.jpg", b"1", "image/jpeg")), ("photos", ("b.jpg", b"2", "image/jpeg")),
+    ]).json()
+    assert got == {"n": 2, "place": "nevera"}
+    assert [i["name"] for i in res["not_seen"]] == ["Queso"]
+    # Guardar lo visto reemplaza la cantidad (la foto muestra lo que queda)
+    client.post("/api/pantry/bulk", json=[{"name": "Leche", "quantity": 500, "unit": "ml", "replace": True}])
+    leche = next(p for p in client.get("/api/pantry").json() if p["name"] == "Leche")
+    assert (leche["quantity"], leche["unit"]) == (500, "ml")

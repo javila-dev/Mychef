@@ -149,7 +149,7 @@ ul.clean { list-style: none; padding: 0; margin: 0; }
 ul.clean li { padding: .5rem 0; border-bottom: 1px dashed var(--line); }
 ul.clean li:last-child { border-bottom: 0; }
 .ing-status { width: 1.4rem; display: inline-flex; justify-content: center; }
-.st-ok { color: var(--green); } .st-poco { color: var(--honey); } .st-falta { color: var(--berry); }
+.st-ok { color: var(--green); } .st-basic { color: var(--muted); } .st-poco { color: var(--honey); } .st-falta { color: var(--berry); }
 table { width: 100%; border-collapse: collapse; }
 td, th { padding: .45rem .35rem; border-bottom: 1px dashed var(--line); text-align: left; vertical-align: middle; }
 th { font-size: .78rem; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: .04em; }
@@ -289,3 +289,12 @@ dialog::backdrop { background: rgba(22, 32, 24, .45); animation: fade-in .22s va
   *, *::before, *::after, dialog::backdrop { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
   button[aria-busy="true"]::after { animation: spin 1.6s linear infinite !important; }
 }
+
+/* Modo de inventario (Administrar → Despensa) */
+.modes { display: grid; gap: .6rem; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.mode { position: relative; display: grid; gap: .2rem; padding: .8rem 1rem; border-radius: 16px; border: 2px solid var(--line); cursor: pointer; background: var(--paper); }
+.mode input { position: absolute; opacity: 0; pointer-events: none; }
+.mode.on { border-color: var(--green); background: var(--green-mist); }
+.mode:focus-within { outline: 2px solid var(--green); outline-offset: 2px; }
+.badge.staple { display: inline-flex; align-items: center; gap: .15rem; padding-right: .15rem; }
+.badge.staple button { width: 24px; height: 24px; min-height: 0; padding: 0 !important; border: 0; color: inherit; }

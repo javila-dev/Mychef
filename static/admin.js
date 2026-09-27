@@ -257,8 +257,8 @@ async function renderRecipes(filters = {}) {
   $$("[data-open]", view).forEach((c) => c.onclick = () => showRecipe(+c.dataset.open));
 }
 
-const STATUS_ICON = { ok: ["check", "st-ok"], hay: ["check", "st-ok"], poco: ["dot", "st-poco"], falta: ["close", "st-falta"] };
-const STATUS_TEXT = { ok: "hay suficiente", hay: "hay, pero en otra unidad: agrega su equivalencia en la despensa", poco: "no alcanza", falta: "no hay" };
+const STATUS_ICON = { ok: ["check", "st-ok"], hay: ["check", "st-ok"], justo: ["check", "st-ok"], basico: ["check", "st-basic"], poco: ["dot", "st-poco"], falta: ["close", "st-falta"] };
+const STATUS_TEXT = { ok: "hay suficiente", hay: "hay, pero en otra unidad: agrega su equivalencia en la despensa", justo: "hay casi todo: alcanza", basico: "básico: se da por hecho que hay", poco: "no alcanza", falta: "no hay" };
 
 async function showRecipe(id, servings) {
   const r = await api(`/api/recipes/${id}${servings ? `?servings=${servings}` : ""}`);
@@ -425,10 +425,33 @@ function importDialog() {
 
 // ------------------------------------------------------------------ despensa
 
+const INVENTORY_MODES = [
+  ["tranquilo", "Tranquilo", "Si hay algo, alcanza. Para no llevar la cuenta exacta."],
+  ["normal", "Normal", "Si hay casi todo (tres cuartas partes), alcanza. Recomendado."],
+  ["exacto", "Exacto", "Cuenta gramo a gramo y no da nada por hecho."],
+];
+
 async function renderPantry() {
-  const items = await api("/api/pantry");
+  const [items, ingredients] = await Promise.all([api("/api/pantry"), api("/api/ingredients")]);
   const expiring = items.filter((i) => i.expiring);
+  const staples = ingredients.filter((i) => i.is_staple);
+  const mode = META.inventory_mode ?? "normal";
   view.innerHTML = `
+    <div class="card stack" style="margin-bottom:.75rem">
+      <h2 style="margin:0">¿Qué tan exigente con lo que hay?</h2>
+      <div class="modes">${INVENTORY_MODES.map(([k, label, text]) => `
+        <label class="mode ${k === mode ? "on" : ""}"><input type="radio" name="inv-mode" value="${k}" ${k === mode ? "checked" : ""}>
+          <b>${label}</b><span class="small muted">${text}</span></label>`).join("")}</div>
+      <div ${mode === "exacto" ? "hidden" : ""}>
+        <p class="small" style="margin:.2rem 0 .5rem"><b>Básicos que siempre hay</b> <span class="muted">— no hace falta tenerlos en el inventario
+          ni aparecen en la lista de compras, salvo que digan «se acabó».</span></p>
+        <div class="row" style="gap:.4rem">${staples.map((i) => `
+          <span class="badge ok staple">${esc(i.name)}<button class="ghost" data-unstaple="${i.id}" aria-label="Quitar ${esc(i.name)} de los básicos">${icon("close", 14)}</button></span>`).join("")}
+          <form id="staple-f" class="row" style="gap:.3rem"><input name="n" placeholder="Agregar básico…" style="width:11rem" list="dl-ing-all" autocomplete="off">
+            <button type="submit">${icon("plus", 18)}</button></form></div>
+        <datalist id="dl-ing-all">${ingredients.filter((i) => !i.is_staple).map((i) => `<option value="${esc(i.name)}">`).join("")}</datalist>
+      </div>
+    </div>
     <div class="card stack" style="margin-bottom:.75rem">
       <div class="row spread"><h2 style="margin:0">¿Qué hay en casa?</h2>
         <div class="row"><button id="add-p">${icon("plus", 20)} Agregar</button>
@@ -484,6 +507,21 @@ async function renderPantry() {
     m.done.then((ok) => ok && renderPantry());
   };
   $("#scan").onclick = scanDialog;
+  $$("[name=inv-mode]", view).forEach((r) => r.onchange = () => safe(async () => {
+    const res = await api("/api/settings", { method: "PUT", json: { inventory_mode: r.value } });
+    META.inventory_mode = res.inventory_mode;
+    toast(`Modo ${INVENTORY_MODES.find(([k]) => k === r.value)[1].toLowerCase()}`);
+    renderPantry();
+  }));
+  $$("[data-unstaple]", view).forEach((b) => b.onclick = () => safe(async () => {
+    await api(`/api/ingredients/${b.dataset.unstaple}`, { method: "PATCH", json: { staple: false } });
+    renderPantry();
+  }));
+  $("#staple-f").onsubmit = (e) => {
+    e.preventDefault();
+    const name = e.target.n.value.trim();
+    if (name) safe(async () => { await api("/api/staples", { method: "POST", json: { name } }); renderPantry(); });
+  };
   $("#use-exp")?.addEventListener("click", (e) => { e.preventDefault(); go("cook"); });
   $$("tr[data-id] input", view).forEach((inp) => inp.onchange = () => safe(async () => {
     const id = inp.closest("tr").dataset.id;

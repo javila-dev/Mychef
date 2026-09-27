@@ -22,6 +22,13 @@ from .models import (
 from .units import dimension, humanize, normalize_unit, to_base
 
 EXPIRING_DAYS = 3
+
+# Qué tan estricta es la casa con el inventario. El número es la parte de lo que pide la receta
+# que tiene que haber para darlo por bueno ("justo"); None = exacto, sin básicos asumidos.
+INVENTORY_MODES = {"exacto": None, "normal": 0.75, "tranquilo": 0.0}
+DEFAULT_MODE = "normal"
+# La lista de compras siempre avisa si falta más de una cuarta parte, aunque el modo sea tranquilo.
+SHOPPING_TOLERANCE = 0.75
 MEAL_ORDER = {"desayuno": 0, "almuerzo": 1, "merienda": 2, "cena": 3}
 
 
@@ -61,14 +68,23 @@ class Stock:
     expires_on: dt.date | None
 
 
-Pantry = dict[int, Stock]
+class Pantry(dict):
+    """ingredient_id -> Stock, más el modo de inventario de la casa."""
+    mode = "exacto"
+
+
+def inventory_mode(session: Session) -> str:
+    s = session.get(Setting, "inventory_mode")
+    return s.value if s and s.value in INVENTORY_MODES else DEFAULT_MODE
 
 
 def load_pantry(session: Session) -> Pantry:
-    return {
-        p.ingredient_id: Stock(p.quantity, p.unit, p.expires_on)
+    pantry = Pantry(
+        (p.ingredient_id, Stock(p.quantity, p.unit, p.expires_on))
         for p in session.exec(select(PantryItem))
-    }
+    )
+    pantry.mode = inventory_mode(session)
+    return pantry
 
 
 def add_to_pantry(
@@ -128,7 +144,14 @@ def scaled_ingredients(recipe: Recipe, servings: int | None) -> list[dict]:
 
 
 def check_availability(recipe: Recipe, servings: int | None, pantry: Pantry) -> dict:
-    """Compara lo que pide la receta (escalada) con lo que hay en la despensa."""
+    """Compara lo que pide la receta (escalada) con lo que hay en la despensa.
+
+    Estados: ok (alcanza), hay (hay algo, en otra unidad), justo (casi alcanza: se da por bueno),
+    basico (sal, aceite…: se asume que hay), poco (no alcanza) y falta (no hay).
+    """
+    mode = getattr(pantry, "mode", "exacto")
+    enough = INVENTORY_MODES.get(mode)
+    flexible = enough is not None
     items = []
     required = ok = 0
     for ri, ing in zip(recipe.ingredients, scaled_ingredients(recipe, servings)):
@@ -145,11 +168,14 @@ def check_availability(recipe: Recipe, servings: int | None, pantry: Pantry) -> 
             elif have + 1e-9 >= ing["quantity"]:
                 entry["status"] = "ok"
             else:
-                entry["status"] = "poco"
                 entry["missing"] = round(ing["quantity"] - have, 2)
+                entry["status"] = "justo" if flexible and have + 1e-9 >= enough * ing["quantity"] else "poco"
+        if flexible and entry["status"] in ("falta", "poco") and ri.ingredient.is_staple:
+            entry["status"] = "basico"
+            entry["missing"] = 0.0
         if not ing["optional"]:
             required += 1
-            if entry["status"] in ("ok", "hay"):
+            if entry["status"] in ("ok", "hay", "justo", "basico"):
                 ok += 1
             elif entry["status"] == "poco" and ing["quantity"]:
                 ok += 1 - entry["missing"] / ing["quantity"]
@@ -160,6 +186,7 @@ def check_availability(recipe: Recipe, servings: int | None, pantry: Pantry) -> 
         "coverage": round(coverage, 3),
         "can_cook": not missing,
         "missing_count": len(missing),
+        "mode": mode,
         "items": items,
     }
 
@@ -326,6 +353,8 @@ def shopping_list(session: Session, start: dt.date, end: dt.date) -> list[dict]:
         )
     ).all()
     pantry = load_pantry(session)
+    flexible = INVENTORY_MODES.get(pantry.mode) is not None
+    tolerance = SHOPPING_TOLERANCE if flexible else 1.0
     # (ingredient_id, unidad) -> cantidad necesaria
     needed: dict[tuple[int, str], float] = {}
     info: dict[int, Ingredient] = {}
@@ -335,6 +364,8 @@ def shopping_list(session: Session, start: dt.date, end: dt.date) -> list[dict]:
             if ing["optional"] or not ing["quantity"]:
                 continue
             iid, ingredient = ing["ingredient_id"], ri.ingredient
+            if flexible and ingredient.is_staple:
+                continue  # los básicos llegan a la lista solo si alguien dice que se acabaron
             info[iid] = ingredient
             used_in.setdefault(iid, set()).add(e.recipe.name)
             stock = pantry.get(iid)
@@ -353,7 +384,7 @@ def shopping_list(session: Session, start: dt.date, end: dt.date) -> list[dict]:
         if stock and normalize_unit(stock.unit) == unit:
             have = stock.quantity
         missing = qty - have
-        if missing <= 1e-9:
+        if missing <= 1e-9 or have + 1e-9 >= tolerance * qty:
             continue
         base_missing, base_unit = to_base(missing, unit)
         base_needed, _ = to_base(qty, unit)
