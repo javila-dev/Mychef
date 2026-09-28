@@ -18,8 +18,8 @@ from dataclasses import dataclass, field
 
 from sqlmodel import Session, select
 
-from . import ai, clock, household, services
-from .models import Chore, Ingredient, Member, PantryItem, Recipe, ShoppingExtra
+from . import agenda, ai, clock, household, services
+from .models import Chore, Event, Ingredient, Member, PantryItem, Recipe, ShoppingExtra
 from .units import strip_accents
 
 MEALS = ["desayuno", "almuerzo", "merienda", "cena"]
@@ -27,7 +27,8 @@ MEALS = ["desayuno", "almuerzo", "merienda", "cena"]
 HELP = (
     "Pueden decir, por ejemplo: se acabó la leche; agrega pan a la lista; ya saqué la basura; "
     "¿qué hay de almuerzo?; ¿qué cocino?; abre la receta de lentejas; "
-    "pon un temporizador de diez minutos para el arroz. Cocinando: siguiente, repite, "
+    "pon un temporizador de diez minutos para el arroz; recuérdame la cita de Benja el jueves a las 3; "
+    "¿qué hay en la agenda? Cocinando: siguiente, repite, "
     "¿cuánto arroz lleva?"
 )
 
@@ -193,6 +194,23 @@ def _rules(session: Session, t: str, ctx: dict, today: dt.date, o: str | None = 
     if re.search(r"^(deshacer|deshaz|me equivoque|eso no|cancela eso|borra eso|no era eso)\b", t):
         return VoiceResult("undo", "Listo, lo deshice.")
 
+    # ------------------------------------------------ agenda familiar
+    # «recuérdame la cita de Benja el jueves a las 3» (pero «recuérdame en 10 minutos…» es un temporizador)
+    if re.match(agenda.TRIGGER, t) and not parse_duration(t):
+        res = _agenda_add(session, o, t, today, ctx)
+        if res:
+            return res
+    if re.search(r"\b(agenda|calendario|citas|compromisos|cumpleanos)\b", t) and re.search(
+        r"\b(que|cuales|cual|ver|abre|abrir|muestra|muestrame|leeme|lee|dime|hay|tenemos)\b", t
+    ) or re.search(r"^que (tenemos|hay que hacer) (hoy|manana|pasado manana|esta semana)$", t):
+        days = 1 if re.search(r"\bhoy\b", t) else 2 if re.search(r"\bmanana\b", t) else 7
+        res = VoiceResult("agenda", agenda.summary(session, today, days))
+        if re.search(r"\b(ver|abre|abrir|muestra|muestrame)\b", t):
+            res.navigate = {"screen": "agenda"}
+        return res
+    if re.search(r"^(abre |ver |muestra )?(la )?(agenda|calendario)$", t):
+        return VoiceResult("navigate", "", navigate={"screen": "agenda"})
+
     # ------------------------------------------------ temporizadores
     if re.search(r"\b(cancela|cancelar|quita|quitar|apaga|apagar|deten|detener|para|parar|borra)\b.*\b(temporizador|temporizadores|alarma|alarmas|timer|cronometro)\b", t):
         return VoiceResult("timer_cancel", "Listo, quité el temporizador.")
@@ -283,6 +301,46 @@ def _rules(session: Session, t: str, ctx: dict, today: dt.date, o: str | None = 
     if re.search(r"^(abre |ver |muestra )?(las )?fotos$", t):
         return VoiceResult("navigate", "", navigate={"screen": "photos"})
     return None
+
+
+def _agenda_add(session: Session, o: str, t: str, today: dt.date, ctx: dict) -> VoiceResult | None:
+    explicit = re.match(r"^(recuerd|recordar|acuerdame|agenda)", t) or re.search(r"\b(agenda|calendario)\b", t)
+    if "lista" in t and not re.search(r"\b(agenda|calendario)\b", t):
+        return None  # «agrega pan a la lista para mañana» es de la lista de compras
+    members = list(session.exec(select(Member)))
+    data = agenda.parse_phrase(o, t, today, members)
+    if data is None and explicit and not ctx.get("handsfree"):
+        try:
+            data = agenda.parse_with_ai(o, today, members, ai.model_for(session, "text"))
+        except ai.AIError:
+            data = None
+        if data is None:
+            return VoiceResult(
+                "agenda_ask", "¿Para qué día? Digan, por ejemplo: recuérdame la cita de Benja el jueves a las 3.",
+            )
+    if data is None:
+        return None
+    event = Event(
+        title=data["title"], category=data["category"], member_id=data["member_id"], day=data["day"],
+        time=data["time"], repeat=data["repeat"], remind=",".join(map(str, data["remind"])),
+    )
+    session.add(event)
+    session.commit()
+    session.refresh(event)
+    who = next((m.name for m in members if m.id == event.member_id), None)
+    who = f" de {who}" if who and who.lower() not in event.title.lower() else ""
+    when = agenda.day_text(event.day, today) + (f" {agenda.say_hour(event.time)}" if event.time else "")
+    rep_txt = {"weekly": ", cada semana", "monthly": ", cada mes", "yearly": ", cada año"}.get(event.repeat, "")
+    first = data["remind"][0] if data["remind"] else None
+    notice = {1440: " Les aviso el día antes.", 120: " Les aviso el día antes y dos horas antes.",
+              60: " Les aviso una hora antes.", 0: " Les aviso ese día."}.get(first, "")
+    if data["remind"] == [1440, 120]:
+        notice = " Les aviso el día antes y dos horas antes."
+    return VoiceResult(
+        "agenda_add", f"Listo, anoté {event.title}{who} para {when}{rep_txt}.{notice}",
+        undo={"steps": [{"method": "DELETE", "url": f"/api/events/{event.id}"}], "speak": "Listo, lo quité de la agenda."},
+        data={"event_id": event.id, "title": event.title, "date": event.day.isoformat(), "time": event.time},
+    )
 
 
 def _say_duration(seconds: int) -> str:

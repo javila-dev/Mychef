@@ -4,10 +4,11 @@ import pytest
 from sqlalchemy import create_engine as sa_create_engine
 from sqlalchemy import inspect, text
 
+from app import clock
 from app import auth, vision
 from app.db import init_db
 
-TODAY = dt.date.today()
+TODAY = clock.today()  # el día en la casa, no en el servidor
 
 
 def test_chores_rotate_and_undo(client):

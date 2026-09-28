@@ -24,7 +24,7 @@ let busy = false; // mientras se lee una factura no se vuelve al inicio
 
 // ---------------------------------------------------------------- navegación
 
-const SCREENS = { home: renderHome, shopping: renderShopping, what: renderWhat, cook: renderCook, chores: renderChores };
+const SCREENS = { home: renderHome, shopping: renderShopping, what: renderWhat, cook: renderCook, chores: renderChores, agenda: renderAgenda };
 
 function go(name, params = {}) {
   if (name !== "cook") stopCookVoice();
@@ -172,6 +172,8 @@ async function renderHome() {
   const current = PHOTOS[photoIdx];
   const listHint = t.shopping_count ? `${t.shopping_count} cosa${t.shopping_count > 1 ? "s" : ""} por comprar` : "No falta nada";
   const cookHint = t.expiring.length ? "Aprovechar lo que vence" : "Ideas con lo que hay";
+  const next = t.agenda?.[0];
+  const agendaHint = next ? `${cap(next.day_text)}: ${next.title}` : "Citas, colegio, cumpleaños";
   const photoHint = PHOTOS.length ? `${PHOTOS.length} foto${PHOTOS.length > 1 ? "s" : ""}` : "Poner fotos";
 
   app.innerHTML = `
@@ -215,6 +217,12 @@ async function renderHome() {
           : `<p class="empty-note" style="text-align:center">Cuando carguen sus recetas, aquí aparece lo que se come hoy.</p>`}
         </section>
 
+        ${t.agenda?.length ? `<section class="widget">
+          <div class="w-head"><h2 class="w-title">${icon("calendar", 22)} Próximos días</h2></div>
+          ${t.agenda.slice(0, 2).map((e) => eventRow(e, true)).join("")}
+          <div class="w-more"><button data-act="agenda">${icon("calendar", 18)} Ver la agenda</button></div>
+        </section>` : ""}
+
         <section class="widget">
           <div class="w-head"><h2 class="w-title">${icon("broom", 22)} Pendientes de hoy</h2>
             <small>${t.chores.length ? (pending.length ? `${pending.length} por hacer` : "¡Todo al día!") : ""}</small></div>
@@ -234,6 +242,8 @@ async function renderHome() {
           <span><span class="label">¿Qué cocino?</span><span class="hint">${cookHint}</span></span></button>
         <button class="act act-out" data-act="ranout">${icon("jar", 34)}
           <span><span class="label">Se acabó algo</span><span class="hint">Anotarlo en la lista</span></span></button>
+        <button class="act act-agenda" data-act="agenda">${icon("calendar", 34)}
+          <span><span class="label">Agenda</span><span class="hint">${esc(agendaHint)}</span></span></button>
         <button class="act act-photos" data-act="photos">${icon("camera", 30)}
           <span><span class="label">Fotos</span><span class="hint">${photoHint}</span></span></button>
         <a class="act act-admin" href="/admin" title="Ajustes: recetas, inventario y tareas" aria-label="Ajustes">${icon("sliders", 28)}<span class="label only-phone">Ajustes</span></a>
@@ -242,9 +252,10 @@ async function renderHome() {
 
   const ACTS = {
     scan: scanChooser, receipt: () => startScan("receipt"), shopping: () => go("shopping"), what: () => go("what"),
-    ranout: ranOutModal, chores: () => go("chores"), photos: photosModal,
+    ranout: ranOutModal, chores: () => go("chores"), photos: photosModal, agenda: () => go("agenda"),
   };
   $$("[data-act]", app).forEach((b) => b.onclick = () => ACTS[b.dataset.act]());
+  $$("[data-ev]", app).forEach((b) => b.onclick = () => go("agenda"));
   $$("[data-meal]", app).forEach((el) => el.onclick = () => {
     const m = t.meals.find((x) => x.id === +el.dataset.meal);
     go("cook", { recipeId: m.recipe.id, servings: m.servings, entryId: m.cooked ? null : m.id });
@@ -405,6 +416,7 @@ async function checkReminders() {
 }
 
 function remindModal(r, st, now) {
+  if (r.kind === "event") return eventReminder(r, st, now);
   reminding = true;
   chime();
   setTimeout(() => say(r.say), 700);
@@ -429,6 +441,131 @@ function remindModal(r, st, now) {
       const members = await safe(() => api("/api/members"));
       if (members) whoModal(r, members, refresh);
     }
+  });
+}
+
+function eventReminder(r, st, now) {
+  reminding = true;
+  chime();
+  setTimeout(() => say(r.say), 700);
+  const [ic, cls] = EVENT_CATS[r.category] ?? EVENT_CATS.otro;
+  const m = modal({
+    title: "Recordatorio", size: "narrow",
+    body: `<div class="done-msg"><div class="mark ev-mark ${cls}">${icon(ic, 44)}</div>
+      <h2>${esc(r.title)}</h2>
+      <p class="muted">${esc(cap(r.day_text))}${r.time ? ` · ${esc(r.time_text)}` : ""}${r.member ? ` · ${avatar(r.member, 26)} ${esc(r.member.name)}` : ""}</p>
+      ${r.notes ? `<p class="m-text">${esc(r.notes)}</p>` : ""}</div>`,
+    actions: [
+      { label: "Entendido", tone: "primary", icon: "check", value: "ok" },
+      { label: "En 30 minutos", icon: "clock", value: "later" },
+    ],
+  });
+  m.done.then((v) => {
+    reminding = false;
+    stopSpeaking();
+    st.seen[r.id] = v === "ok" ? "off" : now + 30;
+    saveRemind(st);
+  });
+}
+
+// ---------------------------------------------------------------- agenda de la familia
+
+const EVENT_CATS = {
+  salud: ["heart", "cat-salud", "Salud"], colegio: ["book", "cat-colegio", "Colegio"],
+  "cumpleaños": ["cake", "cat-cumple", "Cumpleaños"], pagos: ["coin", "cat-pagos", "Pagos"],
+  familia: ["people", "cat-familia", "Familia"], otro: ["calendar", "cat-otro", "Otro"],
+};
+const REPEAT_TEXT = { none: "", weekly: "Cada semana", monthly: "Cada mes", yearly: "Cada año" };
+const REMIND_OPTS = [[1440, "El día antes"], [120, "2 horas antes"], [60, "1 hora antes"], [0, "A la hora"]];
+
+function eventRow(e, compact = false) {
+  const [ic, cls] = EVENT_CATS[e.category] ?? EVENT_CATS.otro;
+  const late = e.date < isoDate(new Date());
+  const when = compact ? `${cap(e.day_text)}${e.time ? ` · ${e.time_text}` : ""}` : (e.time ? e.time_text : "Todo el día");
+  return `<button class="ev-row" data-ev="${e.id}" data-date="${e.date}">
+    <span class="ev-ic ${cls}">${icon(ic, 24)}</span>
+    <span class="ev-txt"><strong>${esc(e.title)}</strong>
+      <span>${esc(when)}${e.member ? ` · ${avatar(e.member, 22)} ${esc(e.member.name)}` : ""}${!compact && e.repeat !== "none" ? ` · ${REPEAT_TEXT[e.repeat]}` : ""}${late ? ` · <span class="late">ya pasó</span>` : ""}</span></span>
+  </button>`;
+}
+
+async function renderAgenda() {
+  const [items, members] = await Promise.all([api("/api/events?days=60"), api("/api/members")]);
+  const groups = [];
+  for (const e of items) {
+    const g = groups.at(-1);
+    if (g && g.date === e.date) g.items.push(e); else groups.push({ date: e.date, label: e.day_text, items: [e] });
+  }
+  const dayName = (iso) => new Date(iso + "T12:00").toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" });
+  app.innerHTML = `${head("Agenda de la familia", "Volver al inicio",
+      `<button class="primary" id="add-ev">${icon("plus", 22)} Agregar</button>`)}
+    ${groups.length ? groups.map((g) => `
+      <section class="sheet ev-day">
+        <h2>${esc(cap(g.label))}${/^(hoy|mañana|pasado)/.test(g.label) ? ` <small>${esc(dayName(g.date))}</small>` : ""}</h2>
+        ${g.items.map((e) => `<div class="ev-line">${eventRow(e)}
+          ${e.repeat === "none" ? `<button class="tick-round" data-done="${e.id}" aria-label="Ya pasó / listo">${icon("check", 26)}</button>` : ""}</div>`).join("")}
+      </section>`).join("")
+    : `<section class="sheet"><p class="empty-note">No hay nada en la agenda para los próximos dos meses.<br>
+        Toquen <b>Agregar</b> o digan «Oye casa, recuérdame la cita de Benja el jueves a las 3».</p></section>`}`;
+  bindBack();
+  $("#add-ev").onclick = () => eventModal(null, members);
+  $$("[data-ev]", app).forEach((b) => b.onclick = () => eventModal(items.find((e) => e.id === +b.dataset.ev && e.date === b.dataset.date), members));
+  $$("[data-done]", app).forEach((b) => b.onclick = () => withBusy(b, async () => {
+    const id = +b.dataset.done;
+    await safe(() => api(`/api/events/${id}/done`, { method: "POST" }));
+    toast("Listo");
+    lastUndo = { steps: [{ method: "POST", url: `/api/events/${id}/undone` }], speak: "Listo, volvió a la agenda." };
+    go("agenda");
+  }));
+}
+
+function eventModal(ev, members) {
+  const e = ev ?? { title: "", category: "familia", member_id: null, first_day: isoDate(new Date()), time: null, repeat: "none", remind: [60], notes: "" };
+  const chip = (name, value, label, checked, type = "radio") =>
+    `<label><input type="${type}" name="${name}" value="${value}" ${checked ? "checked" : ""}><span>${label}</span></label>`;
+  const m = modal({
+    title: ev ? "Cambiar en la agenda" : "Agregar a la agenda",
+    body: `<form id="evf" class="stack">
+      <label class="field">¿Qué es?<input name="title" required maxlength="80" value="${esc(e.title)}" placeholder="Ej: Cita con la pediatra" autocomplete="off"></label>
+      <div class="field">¿De qué tipo?<div class="seg">${Object.entries(EVENT_CATS).map(([k, [ic, , label]]) =>
+        chip("category", k, `${icon(ic, 18)} ${label}`, k === e.category)).join("")}</div></div>
+      <div class="field">¿Para quién?<div class="seg">${chip("member", "", "Toda la familia", !e.member_id)}${members.map((p) =>
+        chip("member", p.id, `${avatar(p, 22)} ${esc(p.name)}`, p.id === e.member_id)).join("")}</div></div>
+      <div class="form-grid">
+        <label class="field">¿Qué día?<input name="day" type="date" required value="${e.first_day ?? e.date}"></label>
+        <label class="field">¿A qué hora? <small class="muted">(opcional)</small><input name="time" type="time" value="${e.time ?? ""}"></label>
+      </div>
+      <label class="field">¿Se repite?<select name="repeat">${Object.entries({ none: "No, una sola vez", weekly: "Cada semana", monthly: "Cada mes", yearly: "Cada año" })
+        .map(([k, t]) => `<option value="${k}" ${k === e.repeat ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+      <div class="field">¿Cuándo avisar en voz alta?<div class="seg">${REMIND_OPTS.map(([v, t]) =>
+        chip("remind", v, t, e.remind.includes(v), "checkbox")).join("")}</div>
+        <small class="muted">Sin hora, «A la hora» avisa ese día a las 7:30 a. m. y «El día antes», la noche anterior.</small></div>
+      <label class="field">Notas <small class="muted">(opcional)</small><textarea name="notes" rows="2" maxlength="300" placeholder="Ej: llevar el carné de vacunas">${esc(e.notes)}</textarea></label>
+    </form>`,
+    actions: [
+      ...(ev ? [{ label: "Borrar", tone: "danger", icon: "trash", value: "delete" }] : []),
+      { label: "Cancelar", value: false },
+      { label: "Guardar", tone: "primary", icon: "check", onClick: async (dlg) => {
+        const f = $("#evf", dlg);
+        if (!f.reportValidity()) return false;
+        const data = {
+          title: f.title.value, category: f.querySelector("[name=category]:checked").value,
+          member_id: +f.querySelector("[name=member]:checked").value || null,
+          day: f.day.value, time: f.time.value || null, repeat: f.repeat.value, notes: f.notes.value,
+          remind: $$("[name=remind]:checked", f).map((i) => +i.value),
+        };
+        const ok = await safe(() => api(ev ? `/api/events/${ev.id}` : "/api/events", { method: ev ? "PUT" : "POST", json: data }));
+        if (!ok) return false;
+        toast(ev ? "Guardado" : "Anotado en la agenda");
+      } },
+    ],
+  });
+  m.done.then(async (v) => {
+    if (v === "delete") {
+      if (!await confirmModal({ title: "¿Borrar de la agenda?", text: esc(ev.title), ok: "Borrar", tone: "danger", okIcon: "trash" })) return;
+      await safe(() => api(`/api/events/${ev.id}`, { method: "DELETE" }));
+    }
+    if (v) go("agenda");
   });
 }
 
@@ -1334,12 +1471,15 @@ async function handleVoiceText(text, { box = null, handsFree: hf = false } = {})
   if (nav) {
     if (nav.screen === "receipt") startScan("receipt");
     else if (nav.screen === "fridge") startScan(nav.place || "nevera");
+    else if (nav.screen === "agenda") go("agenda");
     else if (nav.screen === "photos") photosModal();
     else if (nav.screen === "cook") go("cook", { recipeId: nav.recipeId });
     else if (nav.screen === "what") go("what", nav.meal ? { meal: nav.meal } : {});
     else go(nav.screen);
-  } else if (screen === "home" && ["ran_out", "list_add", "chore_done"].includes(res.intent)) {
+  } else if (screen === "home" && ["ran_out", "list_add", "chore_done", "agenda_add"].includes(res.intent)) {
     safe(renderHome);
+  } else if (screen === "agenda" && res.intent === "agenda_add") {
+    go("agenda");
   }
   await speaking;
   return res;

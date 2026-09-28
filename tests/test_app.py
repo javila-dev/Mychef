@@ -2,6 +2,7 @@ import datetime as dt
 
 import pytest
 
+from app import clock
 from app import vision
 from app.models import ingredient_key
 from app.units import convert, humanize, normalize_unit
@@ -85,7 +86,7 @@ def test_expiring_ingredients_rank_first(client):
         "name": "Lentejas", "meal_types": ["cena"], "dish_type": "sopa", "servings": 4,
         "ingredients": [{"name": "Lenteja", "quantity": 300, "unit": "g"}],
     })
-    tomorrow = (dt.date.today() + dt.timedelta(days=1)).isoformat()
+    tomorrow = (clock.today() + dt.timedelta(days=1)).isoformat()
     client.post("/api/pantry", json={"name": "espinaca", "quantity": 400, "unit": "g", "expires_on": tomorrow})
     client.post("/api/pantry", json={"name": "lentejas", "quantity": 1, "unit": "kg"})
     sugg = client.get("/api/suggestions", params={"meal_type": "cena"}).json()

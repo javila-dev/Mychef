@@ -2,9 +2,10 @@ import datetime as dt
 
 import pytest
 
+from app import clock
 from app import vision, voice
 
-TODAY = dt.date.today()
+TODAY = clock.today()  # el día en la casa, no en el servidor
 
 
 @pytest.fixture(autouse=True)

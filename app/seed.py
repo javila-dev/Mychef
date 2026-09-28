@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 
 from . import clock, services
 from .db import engine, init_db
-from .models import Chore, Member, PantryItem, Recipe
+from .models import Chore, Event, Member, PantryItem, Recipe
 
 EXAMPLES = [
     {
@@ -145,6 +145,15 @@ def main() -> None:
             else:
                 chore.every_days = when
             session.add(chore)
+        # Agenda de ejemplo: (título, tipo, persona, en cuántos días, hora, repetición, avisos)
+        for title, cat, who, days, time, repeat, remind in [
+            ("Cita con la pediatra", "salud", "Sofi", 3, "15:00", "none", "1440,120"),
+            ("Reunión de padres", "colegio", "Sofi", 1, "07:30", "none", "1440,60"),
+            ("Cumpleaños de la abuela", "cumpleaños", None, 12, None, "yearly", "1440,0"),
+            ("Pagar el internet", "pagos", None, 5, None, "monthly", "0"),
+        ]:
+            session.add(Event(title=title, category=cat, member_id=people[who].id if who else None,
+                              day=today + dt.timedelta(days=days), time=time, repeat=repeat, remind=remind))
         for name, (per_cup, per_unit) in EQUIVALENCES.items():
             ing = services.get_or_create_ingredient(session, name)
             ing.g_per_ml = per_cup / 240 if per_cup else None

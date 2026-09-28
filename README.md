@@ -27,6 +27,14 @@ pocas palabras, siempre un **← Volver**, y si nadie la toca por 2 minutos vuel
   **Ya la hicimos**, **En 30 minutos** o **Hoy no**. Solo avisa la pantalla de la casa (no el celular), y si
   estuvo apagada no avisa más de 4 horas tarde.
 - **Ojo con esto**: lo que se vence pronto y lo que se está acabando.
+- **📅 Agenda de la familia**: citas médicas, cosas del colegio (lo de Benja), cumpleaños, pagos y planes.
+  Cada cosa tiene día, hora (opcional), para quién es y si se repite (cada semana, cada mes, cada año).
+  Se elige **cuándo avisar en voz alta**: el día antes (a las 7:30 p. m.), 2 horas antes, 1 hora antes o a la
+  hora; lo que no tiene hora se avisa ese día a las 7:30 a. m. En el inicio se ven los próximos días.
+  Por voz: «Oye casa, **recuérdame la cita de Benja con la pediatra el jueves a las 3**», «anota en la
+  agenda que mañana Benja lleva el uniforme de educación física», «recuérdame pagar el arriendo el 5
+  cada mes», «¿qué hay en la agenda?». La frase se entiende en la casa; si es muy enredada y hay clave de
+  OpenAI, la IA ayuda. Lo que no se repite se marca ✓ cuando ya pasó.
 - **🧾 Escanear → La factura**: foto de la factura del mercado (si es larga, en varias fotos). La IA entiende
   los nombres abreviados ("LCHE ALQ 1100ML X2" → Leche, 2200 ml), separa comida de aseo, y se revisa con
   un toque antes de guardar. Todo queda en el inventario y se registra cuánto se gastó.
@@ -175,6 +183,7 @@ Toquen **Hablar** (junto a la hora o arriba en cada pantalla) y digan, por ejemp
 | Saber qué hay | «¿qué hay de almuerzo?», «¿qué falta comprar?», «¿qué se vence?», «¿qué tareas hay?» |
 | Decidir qué cocinar | «¿qué cocino?», «abre la receta de lentejas» |
 | Temporizadores | «pon un temporizador de diez minutos para el arroz», «¿cuánto falta?», «cancela el temporizador» |
+| Agenda | «recuérdame la cita de Benja el jueves a las 3», «¿qué hay en la agenda?», «¿qué tenemos mañana?» |
 | Corregir | «deshacer» (o el botón **Deshacer** que aparece) |
 
 **Manos libres**: dentro de una receta, toquen **Manos libres** y la tablet queda escuchando mientras
@@ -281,6 +290,7 @@ app/
   household.py Tareas del hogar, facturas, mínimos de inventario y el resumen de "Hoy"
   auth.py      PIN opcional de la casa
   clock.py     La hora y el día de la casa (MYCHEF_TZ)
+  agenda.py    Agenda familiar: repeticiones, avisos en voz alta y frases como «recuérdame…»
   db.py        SQLite o PostgreSQL (MYCHEF_DATABASE_URL); copy_to_postgres.py pasa los datos
   storage.py   Fotos de la familia en disco o en MinIO / S3 (MYCHEF_S3_*)
   services.py  Escalar recetas, disponibilidad, sugerencias, plan semanal, compras

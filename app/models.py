@@ -175,6 +175,27 @@ class ChoreLog(SQLModel, table=True):
     day: dt.date = Field(default_factory=clock.today)
 
 
+EVENT_CATEGORIES = ["salud", "colegio", "cumpleaños", "pagos", "familia", "otro"]
+EVENT_REPEATS = ["none", "weekly", "monthly", "yearly"]
+
+
+class Event(SQLModel, table=True):
+    """Algo de la agenda familiar: una cita médica, una tarea de Benja, un cumpleaños, un pago."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    category: str = "familia"
+    member_id: Optional[int] = Field(default=None, foreign_key="member.id")
+    day: dt.date
+    time: Optional[str] = None  # "HH:MM"; sin hora = todo el día
+    notes: str = ""
+    repeat: str = "none"  # none | weekly | monthly | yearly
+    # Cuándo avisar en voz alta: minutos antes, separados por coma (0 = a la hora, 1440 = el día antes)
+    remind: str = "60"
+    done_on: Optional[dt.date] = None  # para lo que se "entrega" o se cumple una sola vez
+    created_at: dt.datetime = Field(default_factory=utcnow)
+
+
 class Purchase(SQLModel, table=True):
     """Una compra (factura escaneada)."""
 

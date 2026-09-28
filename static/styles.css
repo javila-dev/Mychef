@@ -303,7 +303,7 @@ dialog::backdrop { background: rgba(22, 32, 24, .45); animation: fade-in .22s va
 .seg { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .35rem; }
 .seg label, .days label { position: relative; cursor: pointer; }
 .seg input, .days input { position: absolute; opacity: 0; pointer-events: none; }
-.seg span { display: inline-block; padding: .55rem 1rem; border-radius: 999px; border: 2px solid var(--line); background: var(--paper); font-weight: 500; }
+.seg label > span { display: inline-block; padding: .55rem 1rem; border-radius: 999px; border: 2px solid var(--line); background: var(--paper); font-weight: 500; }
 .seg input:checked + span { border-color: var(--green); background: var(--green-mist); color: var(--green-ink); }
 .days { display: flex; gap: .4rem; margin-top: .35rem; flex-wrap: wrap; }
 .days span { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; border: 2px solid var(--line); font-weight: 600; background: var(--paper); }

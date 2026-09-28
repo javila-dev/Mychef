@@ -17,7 +17,7 @@ import segno
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from . import ai, clock, household, services, storage, vision, voice
+from . import agenda, ai, clock, household, services, storage, vision, voice
 from .auth import AuthMiddleware, check_pin, pin_enabled
 from . import db
 from .db import get_session, init_db
@@ -28,6 +28,7 @@ from .models import (
     MEAL_TYPES,
     Chore,
     ChoreLog,
+    Event,
     FamilyPhoto,
     Ingredient,
     Member,
@@ -917,7 +918,9 @@ def voice_command(data: VoiceIn, session: Session = SessionDep):
 
 @app.get("/api/today")
 def today(session: Session = SessionDep):
-    return household.today_summary(session)
+    data = household.today_summary(session)
+    data["agenda"] = agenda.upcoming(session, 7)[:4]
+    return data
 
 
 @app.get("/api/members")
@@ -955,6 +958,8 @@ def delete_member(member_id: int, session: Session = SessionDep):
             c.member_id = None
         if c.last_done_by == member_id:
             c.last_done_by = None
+    for e in session.exec(select(Event).where(Event.member_id == member_id)):
+        e.member_id = None  # la cita queda, sin persona
     session.delete(member)
     session.commit()
 
@@ -1006,7 +1011,84 @@ def update_chore(chore_id: int, data: ChoreIn, session: Session = SessionDep):
 def chore_reminders(session: Session = SessionDep):
     """Lo que la tablet debe recordar en voz alta hoy, con la hora de la casa."""
     now = clock.now()
-    return {"now": now.strftime("%H:%M"), "today": now.date().isoformat(), "items": household.reminders(session)}
+    items = household.reminders(session) + agenda.alerts(session, now.replace(tzinfo=None))
+    return {"now": now.strftime("%H:%M"), "today": now.date().isoformat(), "items": items}
+
+
+# ---------------------------------------------------------------- agenda familiar
+
+class EventIn(BaseModel):
+    title: str = Field(min_length=1, max_length=80)
+    category: Literal["salud", "colegio", "cumpleaños", "pagos", "familia", "otro"] = "familia"
+    member_id: int | None = None
+    day: dt.date
+    time: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    notes: str = Field("", max_length=300)
+    repeat: Literal["none", "weekly", "monthly", "yearly"] = "none"
+    remind: list[int] = Field(default_factory=lambda: [60])
+
+    def to_fields(self) -> dict:
+        data = self.model_dump()
+        data["title"] = self.title.strip()
+        data["remind"] = ",".join(str(m) for m in sorted({m for m in self.remind if 0 <= m <= 10080}))
+        return data
+
+
+def _get_event(session: Session, event_id: int) -> Event:
+    event = session.get(Event, event_id)
+    if not event:
+        raise HTTPException(404, "No está en la agenda")
+    return event
+
+
+@app.get("/api/events")
+def list_events(days: int = 60, session: Session = SessionDep):
+    return agenda.upcoming(session, min(max(days, 1), 400))
+
+
+@app.post("/api/events", status_code=201)
+def add_event(data: EventIn, session: Session = SessionDep):
+    _check_member(session, data.member_id)
+    event = Event(**data.to_fields())
+    session.add(event)
+    session.commit()
+    session.refresh(event)
+    return agenda.event_out(event, event.day, {m.id: m for m in session.exec(select(Member))}, clock.today())
+
+
+@app.put("/api/events/{event_id}")
+def update_event(event_id: int, data: EventIn, session: Session = SessionDep):
+    event = _get_event(session, event_id)
+    _check_member(session, data.member_id)
+    for k, v in data.to_fields().items():
+        setattr(event, k, v)
+    session.commit()
+    return {"ok": True}
+
+
+@app.post("/api/events/{event_id}/done")
+def event_done(event_id: int, session: Session = SessionDep):
+    """Listo / ya pasó: deja de aparecer y de avisar (solo lo que no se repite)."""
+    event = _get_event(session, event_id)
+    event.done_on = clock.today()
+    session.commit()
+    return {"ok": True}
+
+
+@app.post("/api/events/{event_id}/undone")
+def event_undone(event_id: int, session: Session = SessionDep):
+    event = _get_event(session, event_id)
+    event.done_on = None
+    session.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/events/{event_id}", status_code=204)
+def delete_event(event_id: int, session: Session = SessionDep):
+    event = session.get(Event, event_id)
+    if event:
+        session.delete(event)
+        session.commit()
 
 
 @app.delete("/api/chores/{chore_id}", status_code=204)
