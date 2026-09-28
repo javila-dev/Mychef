@@ -34,6 +34,19 @@
   --sky: #1558b0;
   --sky-soft: #e3eefb;
 
+  /* Tonos suaves con nombre: botones del inicio, grupos del inventario y categorías de la agenda.
+     Fondo (--tint-x) y texto (--tint-x-ink), con contraste ≥ 5.9:1; en modo oscuro se invierten. */
+  --tint-honey: #fff0dc; --tint-honey-ink: #8a4200;
+  --tint-clay: #fde2d3; --tint-clay-ink: #9a3412;
+  --tint-lilac: #efe4f7; --tint-lilac-ink: #6b2f8f;
+  --tint-sky: #e3eefb; --tint-sky-ink: #1558b0;
+  --tint-teal: #dcf1ef; --tint-teal-ink: #0c5c56;
+  --tint-berry: #fce4e2; --tint-berry-ink: #b3261e;
+  --tint-wheat: #f6ead9; --tint-wheat-ink: #7a4510;
+  --tint-indigo: #e6ecfa; --tint-indigo-ink: #3446a0;
+  --tint-stone: #eef0f2; --tint-stone-ink: #374151;
+  --alert: #d93025;          /* contador rojo */
+
   --display: "Lexend", "Segoe UI", system-ui, sans-serif;
   --sans: "Lexend", "Segoe UI", system-ui, sans-serif;
   --r-sm: 12px;
@@ -52,6 +65,15 @@
     --on-green: #0b130e;
     --terra: #ffb870; --terra-soft: #3a2a17; --honey: #ffb870; --honey-fill: #d98a14; --honey-soft: #3a2a17;
     --berry: #ff9c92; --berry-soft: #3f2220; --sky: #8ab8ff; --sky-soft: #1c2a40;
+    --tint-honey: #3a2a17; --tint-honey-ink: #ffb870;
+    --tint-clay: #3d2419; --tint-clay-ink: #ffa27a;
+    --tint-lilac: #33243f; --tint-lilac-ink: #d8b4fe;
+    --tint-sky: #1b2a3d; --tint-sky-ink: #93c5fd;
+    --tint-teal: #173330; --tint-teal-ink: #7fdcd2;
+    --tint-berry: #3f2220; --tint-berry-ink: #ff9c92;
+    --tint-wheat: #36291b; --tint-wheat-ink: #f0c48f;
+    --tint-indigo: #1e2540; --tint-indigo-ink: #a5b4fc;
+    --tint-stone: #2a2f33; --tint-stone-ink: #d1d5db;
     --float: 0 24px 60px -24px rgba(0, 0, 0, .8), 0 4px 12px -6px rgba(0, 0, 0, .5);
     color-scheme: dark;
   }
@@ -68,9 +90,9 @@ body {
 ::selection { background: color-mix(in srgb, var(--green) 28%, transparent); color: var(--ink); }
 .num { font-variant-numeric: tabular-nums; }
 h1, h2, h3 { font-family: var(--display); font-weight: 600; letter-spacing: -.01em; line-height: 1.2; text-wrap: balance; }
-h1 { font-size: 1.65rem; margin: 0; }
-h2 { font-size: 1.4rem; margin: 0 0 .75rem; }
-h3 { font-size: 1.15rem; margin: 1.2rem 0 .5rem; }
+h1 { font-size: 1.6rem; margin: 0; }
+h2 { font-size: 1.3rem; margin: 0 0 .75rem; }
+h3 { font-size: 1.1rem; margin: 1.2rem 0 .5rem; }
 .muted { color: var(--muted); }
 .small { font-size: .88rem; }
 .i { flex: none; vertical-align: -0.2em; }
@@ -170,8 +192,8 @@ tr.cat th { font-weight: 600; font-size: .95rem; text-transform: none; letter-sp
   padding: .8rem 1.2rem; background: var(--paper); border-bottom: 1px solid var(--line);
 }
 .brand { display: flex; align-items: center; gap: .7rem; }
-.brand h1 { font-size: 1.35rem; }
-.brand small { display: block; font-family: var(--sans); font-size: .8rem; color: var(--muted); font-weight: 400; letter-spacing: 0; }
+.brand h1 { font-size: 1.3rem; }
+.brand small { display: block; font-family: var(--sans); font-size: .78rem; color: var(--muted); font-weight: 400; letter-spacing: 0; }
 .household { font-size: .88rem; color: var(--muted); display: flex; align-items: center; gap: .5rem; font-weight: 500; }
 .household input { width: 4rem; }
 
@@ -214,19 +236,19 @@ dialog::backdrop { background: rgba(22, 32, 24, .45); animation: fade-in .22s va
   display: flex; align-items: center; justify-content: space-between; gap: 1rem;
   padding: 1.1rem 1.2rem .6rem 1.4rem;
 }
-.m-title { margin: 0; font-size: 1.35rem; }
+.m-title { margin: 0; font-size: 1.3rem; }
 .m-x { border: 0; background: var(--paper-2); width: 40px; height: 40px; padding: 0; border-radius: 50%; color: var(--muted); }
 .m-x:hover { background: var(--green-soft); color: var(--green-ink); }
 .m-body { padding: .2rem 1.4rem 1rem; overflow-y: auto; }
-.m-text { margin: 0; font-size: 1.05rem; color: var(--muted); }
+.m-text { margin: 0; font-size: 1.1rem; color: var(--muted); }
 .m-actions {
   display: flex; justify-content: flex-end; gap: .6rem; flex-wrap: wrap;
   padding: .9rem 1.2rem 1.1rem; border-top: 1px dashed var(--line); background: var(--paper-2);
 }
-.m-actions button { padding: .7rem 1.2rem; font-size: 1.02rem; }
+.m-actions button { padding: .7rem 1.2rem; font-size: 1rem; }
 #modal-body { padding: 1.2rem 1.4rem 1.3rem; overflow-y: auto; }
 .modal-head { display: flex; justify-content: space-between; align-items: start; gap: 1rem; margin-bottom: .4rem; }
-.modal-head h2 { margin: 0; font-size: 1.35rem; }
+.modal-head h2 { margin: 0; font-size: 1.3rem; }
 
 /* avatares de la familia */
 .avatar { display: inline-grid; place-items: center; flex: none; border-radius: 50%; background: var(--av); color: #fff; font-weight: 600; line-height: 1; vertical-align: middle; }
@@ -236,7 +258,7 @@ dialog::backdrop { background: rgba(22, 32, 24, .45); animation: fade-in .22s va
 .pick label { cursor: pointer; }
 .pick input { position: absolute; opacity: 0; pointer-events: none; }
 .pick span {
-  display: grid; place-items: center; width: 52px; height: 52px; font-size: 1.7rem; border-radius: 14px;
+  display: grid; place-items: center; width: 52px; height: 52px; font-size: 1.6rem; border-radius: var(--r-sm);
   background: var(--paper-2); border: 2px solid var(--line);
 }
 .pick input:checked + span { border-color: var(--green); background: var(--green-soft); }
@@ -263,7 +285,7 @@ dialog::backdrop { background: rgba(22, 32, 24, .45); animation: fade-in .22s va
 .pin-dots { font-size: 1.6rem; letter-spacing: .5rem; min-height: 2.6rem; color: var(--green); }
 .pin-error { color: var(--berry); min-height: 1.5rem; font-weight: 500; }
 .pin-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: .7rem; margin-top: .6rem; }
-.pin-pad button { font-size: 1.7rem; font-variant-numeric: tabular-nums; padding: .9rem 0; border-radius: var(--r); }
+.pin-pad button { font-size: 1.6rem; font-variant-numeric: tabular-nums; padding: .9rem 0; border-radius: var(--r); }
 .pin-pad button.ok { background: var(--green); border-color: var(--green); color: var(--on-green); }
 
 @media (max-width: 640px) {
@@ -281,7 +303,7 @@ dialog::backdrop { background: rgba(22, 32, 24, .45); animation: fade-in .22s va
 
 /* Modo de inventario (Administrar → Despensa) */
 .modes { display: grid; gap: .6rem; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
-.mode { position: relative; display: grid; gap: .2rem; padding: .8rem 1rem; border-radius: 16px; border: 2px solid var(--line); cursor: pointer; background: var(--paper); }
+.mode { position: relative; display: grid; gap: .2rem; padding: .8rem 1rem; border-radius: var(--r); border: 2px solid var(--line); cursor: pointer; background: var(--paper); }
 .mode input { position: absolute; opacity: 0; pointer-events: none; }
 .mode.on { border-color: var(--green); background: var(--green-mist); }
 .mode:focus-within { outline: 2px solid var(--green); outline-offset: 2px; }
@@ -327,7 +349,7 @@ dialog::backdrop { background: rgba(22, 32, 24, .45); animation: fade-in .22s va
 .inv-qty { display: flex; align-items: center; justify-content: center; gap: 1rem; }
 .inv-qty > button { width: 64px; height: 64px; padding: 0 !important; flex: none; border-radius: 50%; background: var(--paper-2) !important; border-color: transparent !important; }
 .inv-qty label { display: flex; flex-direction: column; align-items: center; gap: .3rem; min-width: 0; }
-.inv-qty input { width: 7.5rem; max-width: 100%; text-align: center; font-size: 2rem !important; font-weight: 500; font-variant-numeric: tabular-nums; padding: .5rem !important; }
+.inv-qty input { width: 7.5rem; max-width: 100%; text-align: center; font-size: 2.2rem !important; font-weight: 500; font-variant-numeric: tabular-nums; padding: .5rem !important; }
 .inv-qty .qu-txt { font-size: 1.1rem; color: var(--muted); }
 .inv-qty select { width: auto; }
 @media (max-width: 760px) {

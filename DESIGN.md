@@ -18,14 +18,36 @@ colors:
   amber-soft: "#fff0dc"
   red: "#b3261e"
   red-soft: "#fce4e2"
-  tile-list-bg: "#fff0dc"
-  tile-list-ink: "#8a4200"
-  tile-cook-bg: "#fde2d3"
-  tile-cook-ink: "#9a3412"
-  tile-photos-bg: "#efe4f7"
-  tile-photos-ink: "#6b2f8f"
-  tile-inv-bg: "#dcf1ef"
-  tile-inv-ink: "#0c5c56"
+  alert: "#d93025"
+  # Tonos suaves con nombre (fondo / texto). Modo oscuro en styles.css (--tint-*).
+  tint-honey: "#fff0dc"
+  tint-honey-ink: "#8a4200"
+  tint-clay: "#fde2d3"
+  tint-clay-ink: "#9a3412"
+  tint-lilac: "#efe4f7"
+  tint-lilac-ink: "#6b2f8f"
+  tint-sky: "#e3eefb"
+  tint-sky-ink: "#1558b0"
+  tint-teal: "#dcf1ef"
+  tint-teal-ink: "#0c5c56"
+  tint-berry: "#fce4e2"
+  tint-berry-ink: "#b3261e"
+  tint-wheat: "#f6ead9"
+  tint-wheat-ink: "#7a4510"
+  tint-indigo: "#e6ecfa"
+  tint-indigo-ink: "#3446a0"
+  tint-stone: "#eef0f2"
+  tint-stone-ink: "#374151"
+  on-honey: "#1f1300"
+  # Sobre la foto de la familia: velos y sombras (negro con transparencia) y el fondo sin fotos
+  wallpaper: "#1d5e3f"
+  photo-black: "#000"
+  veil-35: "rgba(0, 0, 0, .35)"
+  veil-45: "rgba(0, 0, 0, .45)"
+  veil-50: "rgba(0, 0, 0, .5)"
+  veil-55: "rgba(0, 0, 0, .55)"
+  veil-60: "rgba(0, 0, 0, .6)"
+  scrim: "rgba(22, 32, 24, .45)"
 typography:
   clock:
     fontFamily: "Lexend, Segoe UI, system-ui, sans-serif"
@@ -52,6 +74,40 @@ typography:
     fontFamily: "Lexend, Segoe UI, system-ui, sans-serif"
     fontSize: "0.88rem"
     fontWeight: 500
+  micro:
+    fontFamily: "Lexend, Segoe UI, system-ui, sans-serif"
+    fontSize: "0.78rem"
+    fontWeight: 600
+    letterSpacing: "0.06em"
+  small:
+    fontFamily: "Lexend, Segoe UI, system-ui, sans-serif"
+    fontSize: "0.95rem"
+    fontWeight: 400
+  body-sm:
+    fontFamily: "Lexend, Segoe UI, system-ui, sans-serif"
+    fontSize: "1rem"
+    fontWeight: 400
+  body-lg:
+    fontFamily: "Lexend, Segoe UI, system-ui, sans-serif"
+    fontSize: "1.1rem"
+    fontWeight: 500
+  subhead:
+    fontFamily: "Lexend, Segoe UI, system-ui, sans-serif"
+    fontSize: "1.6rem"
+    fontWeight: 600
+  display:
+    fontFamily: "Lexend, Segoe UI, system-ui, sans-serif"
+    fontSize: "2.2rem"
+    fontWeight: 600
+    letterSpacing: "-0.02em"
+  clock-md:
+    fontFamily: "Lexend, Segoe UI, system-ui, sans-serif"
+    fontSize: "5rem"
+    fontWeight: 300
+  clock-sm:
+    fontFamily: "Lexend, Segoe UI, system-ui, sans-serif"
+    fontSize: "4rem"
+    fontWeight: 300
 rounded:
   sm: "12px"
   md: "18px"
@@ -116,13 +172,13 @@ Dos superficies: la **pantalla de la casa** (`/`, tablet en la nevera y celular)
 
 ## Colors
 
-Estrategia contenida: grises neutros y blanco, un solo acento verde para la acción principal y el estado "hecho". Los botones de acción del inicio tienen cada uno su tono suave (miel, terracota, verde, lila) para distinguirse de un vistazo; su texto es el mismo tono oscurecido (contraste ≥ 5.9:1). Ámbar = avisos (vence, se acaba); rojo = errores y borrar. Modo oscuro automático con las mismas funciones de color.
+Estrategia contenida: grises neutros y blanco, un solo acento verde para la acción principal y el estado "hecho". Los botones de acción del inicio, los grupos del inventario y las categorías de la agenda usan una misma familia de tonos suaves con nombre (miel, arcilla, lila, cielo, turquesa, baya, trigo, índigo, piedra, más el verde): fondo claro y texto del mismo tono oscurecido (contraste ≥ 5.9:1). Viven como variables `--tint-*` en styles.css y se invierten solas en modo oscuro. Ámbar = avisos (vence, se acaba); rojo = errores y borrar. Modo oscuro automático con las mismas funciones de color.
 
 Sobre la foto: texto blanco con sombra suave y un velo oscuro a la izquierda y abajo; nada de texto gris sobre la foto.
 
 ## Typography
 
-Una sola familia, **Lexend** (autoalojada, OFL), elegida por su legibilidad. Reloj en 300 muy grande con números tabulares; saludo en 600; títulos de tarjetas en 600; texto en 400; etiquetas en 500. Cantidades y precios siempre con números tabulares. Sin cursivas (Lexend no las tiene).
+Una sola familia, **Lexend** (autoalojada, OFL), elegida por su legibilidad. Escala de tamaños: micro .78 (etiquetas en versalitas), label .88, small .95, body-sm 1, body 18px, body-lg 1.1, title 1.3, subhead 1.6, display 2.2 (títulos de pantalla), headline 2.4 y el reloj (6.2 / 5 / 4 según el ancho). Reloj en 300 muy grande con números tabulares; saludo en 600; títulos de tarjetas en 600; texto en 400; etiquetas en 500. Cantidades y precios siempre con números tabulares. Sin cursivas (Lexend no las tiene).
 
 ## Layout
 
