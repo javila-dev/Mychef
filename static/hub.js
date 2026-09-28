@@ -4,8 +4,9 @@
 // y si nadie la toca un rato, vuelve sola al inicio.
 
 import {
-  $, $$, api, avatar, cap, choreIcon, compressImage, confirmModal, esc, fmtAmount, fmtMoney, icon, isoDate,
-  modal, mondayOf, safe, toPantryLine, toast, withBusy,
+  $, $$, addDays, amountForm, api, avatar, bindPeople, peoplePicker, readPeople, bindAmountForm, bindSchedule, cap, CHORE_ICONS, readSchedule, scheduleFields, choreIcon, compressImage, confirmModal, esc, fmtAmount, fmtMoney, house,
+  icon, isoDate, modal, mondayOf, peopleText, PORTION, readAmountForm, safe, setHouse,
+  toPantryLine, toast, withBusy,
 } from "./common.js";
 import {
   HandsFree, Timers, VOICE_SECURE, VOICE_SUPPORTED, chime, listenOnce, matchWake, speak, stopListening,
@@ -16,6 +17,7 @@ const app = $("#app");
 const IDLE_MS = 2 * 60 * 1000;
 const MEAL_LABEL = { desayuno: "Desayuno", almuerzo: "Almuerzo", merienda: "Merienda", cena: "Cena" };
 const MEAL_ICON = { desayuno: "cup", almuerzo: "sun", merienda: "apple", cena: "moon" };
+const MEAL_ORDER = ["desayuno", "almuerzo", "merienda", "cena"];
 
 let META = null;
 let TODAY = null;
@@ -24,11 +26,15 @@ let busy = false; // mientras se lee una factura no se vuelve al inicio
 
 // ---------------------------------------------------------------- navegación
 
-const SCREENS = { home: renderHome, shopping: renderShopping, what: renderWhat, cook: renderCook, chores: renderChores, agenda: renderAgenda };
+const SCREENS = {
+  home: renderHome, shopping: renderShopping, what: renderWhat, cook: renderCook, chores: renderChores, agenda: renderAgenda,
+  inventory: renderInventory, invGroup: renderInvGroup, menu: renderMenu,
+};
 
 function go(name, params = {}) {
   if (name !== "cook") stopCookVoice();
   screen = name;
+  resetIdle();
   document.body.classList.toggle("at-home", name === "home");
   window.scrollTo(0, 0);
   return safe(() => SCREENS[name](params));
@@ -52,11 +58,13 @@ function bindBack(to = home) {
 let idleTimer = null;
 function resetIdle() {
   clearTimeout(idleTimer);
+  // Revisando la nevera se pasa rato mirando adentro sin tocar la pantalla: ahí espera más.
+  const wait = screen === "invGroup" ? 5 * IDLE_MS : IDLE_MS;
   idleTimer = setTimeout(() => {
     if (busy || handsFree?.active || document.querySelector("dialog[open] .ring")) return resetIdle();
     $$("dialog.m[open]").forEach((d) => { d.close(); d.remove(); });
     if (screen !== "home") home();
-  }, IDLE_MS);
+  }, wait);
 }
 ["pointerdown", "keydown"].forEach((ev) => document.addEventListener(ev, resetIdle, { passive: true }));
 
@@ -111,6 +119,25 @@ function errorState(retry) {
     <button class="primary big" id="retry">${icon("undo")} Intentar de nuevo</button></div>`;
   document.body.classList.remove("at-home");
   $("#retry").onclick = retry;
+}
+
+// Enlace pequeño arriba a la derecha de cada tarjeta del inicio («Semana ›», «Todas ›»).
+function headLink(act, label) {
+  return `<button class="w-link" data-act="${act}">${label}${icon("chevron", 18)}</button>`;
+}
+
+// Una comida de hoy en una sola línea: ícono, plato y cómo estamos. La que sigue va resaltada.
+function mealRow(m, next) {
+  const label = MEAL_LABEL[m.meal_type] ?? m.meal_type;
+  const state = m.cooked ? `<span class="m-done">ya se cocinó</span>`
+    : m.can_cook ? `<span class="m-ok" aria-label="Tenemos todo">${icon("check", 20)}</span>`
+    : `<span class="m-miss" title="Falta: ${esc(m.missing.join(", "))}">${m.missing.length === 1 ? `falta ${esc(m.missing[0].toLowerCase())}` : `faltan ${m.missing.length}`}</span>`;
+  return `<button class="meal-row ${m.cooked ? "done" : ""} ${next ? "next" : ""}" data-meal="${m.id}"
+      aria-label="${esc(label)}: ${esc(m.recipe.name)}${m.cooked ? ", ya se cocinó" : m.can_cook ? ", tenemos todo" : `, falta ${esc(m.missing.join(", "))}`}">
+    <span class="m-ic">${icon(MEAL_ICON[m.meal_type] ?? "plate", 20)}</span>
+    <span class="m-txt">${next ? `<small>${esc(label)} · lo siguiente</small>` : ""}<span class="m-name">${esc(m.recipe.name)}</span></span>
+    ${state}
+  </button>`;
 }
 
 // ---------------------------------------------------------------- fotos de la familia (fondo)
@@ -170,17 +197,17 @@ async function renderHome() {
   ];
   const date = cap(new Date().toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" }));
   const current = PHOTOS[photoIdx];
-  const listHint = t.shopping_count ? `${t.shopping_count} cosa${t.shopping_count > 1 ? "s" : ""} por comprar` : "No falta nada";
-  const cookHint = t.expiring.length ? "Aprovechar lo que vence" : "Ideas con lo que hay";
-  const next = t.agenda?.[0];
-  const agendaHint = next ? `${cap(next.day_text)}: ${next.title}` : "Citas, colegio, cumpleaños";
-  const photoHint = PHOTOS.length ? `${PHOTOS.length} foto${PHOTOS.length > 1 ? "s" : ""}` : "Poner fotos";
+  const inv = t.inventory ?? {};
+  const weekend = [0, 6].includes(new Date().getDay());
+  const pendingMeals = t.meals.filter((m) => !m.cooked);
+  const nextMeal = pendingMeals.find((m) => MEAL_ORDER.indexOf(m.meal_type) >= MEAL_ORDER.indexOf(mealNow())) ?? pendingMeals[0];
 
   app.innerHTML = `
     <div class="home">
       <div class="left">
         <header class="time-block">
-          <div class="clock-row"><div class="clock" id="clock">${clock()}</div>${micButton("on-photo")}${wakeButton()}</div>
+          <div class="clock-row"><div class="clock" id="clock">${clock()}</div>${micButton("on-photo")}
+            <button class="scan-pill" data-act="scan">${icon("camera", 26)}<span>Escanear</span></button></div>
           <h1 class="hello">${greeting()}</h1>
           <div class="today-line">${date} · ${esc(META.house_name)}</div>
         </header>
@@ -200,81 +227,61 @@ async function renderHome() {
       <div class="widgets">
         ${firstRun ? `<section class="widget">
           <div class="w-head"><h2 class="w-title">${icon("home", 22)} Bienvenidos</h2></div>
-          <p class="empty-note">Toquen <b>Ajustes</b> (abajo a la derecha) para cargar sus recetas, las personas y las tareas, y <b>Fotos</b> para poner fotos de la familia.</p>
+          <p class="empty-note">Toquen <b>Ajustes</b> (abajo a la derecha) para cargar sus recetas y las personas, <b>Tareas</b> para las tareas de la casa y <b>Fotos</b> para poner fotos de la familia.</p>
         </section>` : ""}
 
         <section class="widget mesa">
-          <h2>Hoy en la mesa</h2>
-          ${t.meals.length ? t.meals.map((m) => `
-            <button class="dish ${m.cooked ? "done" : ""}" data-meal="${m.id}">
-              <span class="line"><span class="when">${esc(MEAL_LABEL[m.meal_type] ?? m.meal_type)}</span><span class="dots"></span>
-                <span class="name">${esc(m.recipe.name)}</span></span>
-              <span class="state ${m.cooked ? "" : m.can_cook ? "ok" : "miss"}">${m.cooked ? `${icon("check", 16)} Ya se cocinó`
-                : m.can_cook ? `${icon("check", 16)} Tenemos todo` : `Falta: ${esc(m.missing.join(", "))}`}</span>
-            </button>`).join("")
-          : t.setup.recipes ? `<p class="empty-note" style="text-align:center">Todavía no hay menú para hoy.</p>
-             <div class="w-more" style="text-align:center"><button class="primary" id="plan">${icon("spark", 20)} Armar el menú de la semana</button></div>`
-          : `<p class="empty-note" style="text-align:center">Cuando carguen sus recetas, aquí aparece lo que se come hoy.</p>`}
+          <div class="w-head"><h2 class="w-title">${icon("plate", 22)} Hoy en la mesa</h2>
+            ${t.setup.recipes ? headLink("menu", "Semana") : ""}</div>
+          ${t.meals.length ? t.meals.map((m) => mealRow(m, m.id === nextMeal?.id)).join("")
+          : t.setup.recipes ? `<p class="empty-note">Todavía no hay menú para hoy.</p>
+             <div class="w-more"><button class="primary" data-act="menu">${icon("calendar", 20)} Armar el menú de la semana</button></div>`
+          : `<p class="empty-note">Cuando carguen sus recetas, aquí aparece lo que se come hoy.</p>`}
         </section>
 
         ${t.agenda?.length ? `<section class="widget">
-          <div class="w-head"><h2 class="w-title">${icon("calendar", 22)} Próximos días</h2></div>
+          <div class="w-head"><h2 class="w-title">${icon("calendar", 22)} Próximos días</h2>${headLink("agenda", "Agenda")}</div>
           ${t.agenda.slice(0, 2).map((e) => eventRow(e, true)).join("")}
-          <div class="w-more"><button data-act="agenda">${icon("calendar", 18)} Ver la agenda</button></div>
         </section>` : ""}
 
         <section class="widget">
-          <div class="w-head"><h2 class="w-title">${icon("broom", 22)} Pendientes de hoy</h2>
-            <small>${t.chores.length ? (pending.length ? `${pending.length} por hacer` : "¡Todo al día!") : ""}</small></div>
+          <div class="w-head"><h2 class="w-title">${icon("broom", 22)} Pendientes de hoy
+              ${t.chores.length ? `<small>${pending.length ? `${pending.length} por hacer` : "¡Todo al día!"}</small>` : ""}</h2>
+            ${headLink("chores", "Todas")}</div>
           ${shownChores.length ? shownChores.map(choreRow).join("")
-            : `<p class="empty-note">${t.setup.chores ? "Nada pendiente por hoy." : "Aún no hay tareas. Se agregan en Ajustes."}</p>`}
-          ${t.setup.chores ? `<div class="w-more"><button data-act="chores">${icon("broom", 18)} Ver todas las tareas${t.chores.length > 3 ? ` (${t.chores.length})` : ""}</button></div>` : ""}
+            : `<p class="empty-note">${t.setup.chores ? "Nada pendiente por hoy." : "Aún no hay tareas. Toquen «Todas» para agregar la primera."}</p>`}
         </section>
       </div>
 
       <nav class="actions" aria-label="Qué quieren hacer">
-        <button class="act act-scan" data-act="scan">${icon("camera", 34)}
-          <span><span class="label">Escanear</span><span class="hint">La factura o la nevera</span></span></button>
         <button class="act act-list" data-act="shopping">${icon("basket", 34)}
           ${t.shopping_count ? `<span class="count" aria-label="${t.shopping_count} por comprar">${t.shopping_count}</span>` : ""}
-          <span><span class="label">Lista de compras</span><span class="hint">${listHint}</span></span></button>
-        <button class="act act-cook" data-act="what">${icon("pot", 34)}
-          <span><span class="label">¿Qué cocino?</span><span class="hint">${cookHint}</span></span></button>
-        <button class="act act-out" data-act="ranout">${icon("jar", 34)}
-          <span><span class="label">Se acabó algo</span><span class="hint">Anotarlo en la lista</span></span></button>
-        <button class="act act-agenda" data-act="agenda">${icon("calendar", 34)}
-          <span><span class="label">Agenda</span><span class="hint">${esc(agendaHint)}</span></span></button>
-        <button class="act act-photos" data-act="photos">${icon("camera", 30)}
-          <span><span class="label">Fotos</span><span class="hint">${photoHint}</span></span></button>
-        <a class="act act-admin" href="/admin" title="Ajustes: recetas, inventario y tareas" aria-label="Ajustes">${icon("sliders", 28)}<span class="label only-phone">Ajustes</span></a>
+          <span class="label">Lista de compras</span></button>
+        <button class="act act-cook" data-act="what">${icon("pot", 34)}<span class="label">¿Qué cocino?</span></button>
+        <button class="act act-out" data-act="ranout">${icon("jar", 34)}<span class="label">¿Qué falta?</span></button>
+        <button class="act act-inv ${inv.due && weekend ? "due" : ""}" data-act="inventory"
+          ${inv.due && weekend ? `aria-label="¿Qué hay? Hoy toca revisar"` : ""}>${icon("fridge", 34)}<span class="label">¿Qué hay?</span></button>
+        <button class="act act-chores" data-act="chores">${icon("broom", 34)}
+          ${pending.length ? `<span class="count" aria-label="${pending.length} tareas pendientes hoy">${pending.length}</span>` : ""}
+          <span class="label">Tareas</span></button>
+        <button class="act act-agenda" data-act="agenda">${icon("calendar", 34)}<span class="label">Agenda</span></button>
+        <button class="act act-photos" data-act="photos">${icon("camera", 34)}<span class="label">Fotos</span></button>
+        <a class="act act-admin" href="/admin" title="Ajustes: recetas, inventario y tareas" aria-label="Ajustes">${icon("sliders", 28)}<span class="label">Ajustes</span></a>
       </nav>
     </div>`;
 
   const ACTS = {
     scan: scanChooser, receipt: () => startScan("receipt"), shopping: () => go("shopping"), what: () => go("what"),
     ranout: ranOutModal, chores: () => go("chores"), photos: photosModal, agenda: () => go("agenda"),
+    inventory: () => go("inventory"), menu: () => go("menu"),
   };
   $$("[data-act]", app).forEach((b) => b.onclick = () => ACTS[b.dataset.act]());
   $$("[data-ev]", app).forEach((b) => b.onclick = () => go("agenda"));
   $$("[data-meal]", app).forEach((el) => el.onclick = () => {
     const m = t.meals.find((x) => x.id === +el.dataset.meal);
-    go("cook", { recipeId: m.recipe.id, servings: m.servings, entryId: m.cooked ? null : m.id });
+    go("cook", { recipeId: m.recipe.id, servings: m.servings, kids: m.kids, entryId: m.cooked ? null : m.id });
   });
   bindChores(t.chores, home);
-  $("#plan")?.addEventListener("click", (e) => safe(async () => {
-    const btn = e.currentTarget;
-    const ok = await confirmModal({
-      title: "¿Armamos el menú de la semana?",
-      text: "Se llenan el almuerzo y la cena de cada día con sus recetas, usando primero lo que ya hay en la casa. Después se puede cambiar.",
-      ok: "Sí, armarlo", okIcon: "spark",
-    });
-    if (!ok) return;
-    const created = await withBusy(btn, () => api("/api/menu/autoplan", { method: "POST", json: {
-      start: isoDate(mondayOf(new Date())), days: 7, meal_types: ["almuerzo", "cena"],
-    } }));
-    toast(created.length ? "Menú de la semana listo" : "Primero agreguen recetas en Ajustes");
-    home();
-  }));
 }
 
 setInterval(() => { const c = $("#clock"); if (c) c.textContent = clock(); }, 15000);
@@ -335,6 +342,7 @@ function choreRow(c, full = false) {
   return `<div class="chore ${c.done_today ? "done" : ""}">
     <span class="emo">${choreIcon(c.emoji, 30)}</span>
     <span class="txt"><strong>${esc(c.name)}</strong><span>${who}${late}${next}</span>${when}</span>
+    ${full ? `<button class="edit-round" data-edit-chore="${c.id}" aria-label="Cambiar «${esc(c.name)}»">${icon("pencil", 22)}</button>` : ""}
     <button class="tick-round" data-chore="${c.id}" aria-label="${c.done_today ? "Deshacer" : "Marcar como hecha"}">${icon("check", 30)}</button>
   </div>`;
 }
@@ -533,7 +541,7 @@ function eventModal(ev, members) {
         chip("member", p.id, `${avatar(p, 22)} ${esc(p.name)}`, p.id === e.member_id)).join("")}</div></div>
       <div class="form-grid">
         <label class="field">¿Qué día?<input name="day" type="date" required value="${e.first_day ?? e.date}"></label>
-        <label class="field">¿A qué hora? <small class="muted">(opcional)</small><input name="time" type="time" value="${e.time ?? ""}"></label>
+        <label class="field">¿A qué hora?<input name="time" type="time" value="${e.time ?? ""}"></label>
       </div>
       <label class="field">¿Se repite?<select name="repeat">${Object.entries({ none: "No, una sola vez", weekly: "Cada semana", monthly: "Cada mes", yearly: "Cada año" })
         .map(([k, t]) => `<option value="${k}" ${k === e.repeat ? "selected" : ""}>${t}</option>`).join("")}</select></label>
@@ -582,10 +590,64 @@ async function renderChores() {
   const chores = await api("/api/chores");
   TODAY = TODAY ?? await api("/api/today");
   app.innerHTML = `${head("Tareas de la casa")}
-    <section class="sheet chores-sheet">${chores.map((c) => choreRow(c, true)).join("") || `<p class="empty-note">Aún no hay tareas.</p>`}</section>
-    <p class="muted" style="margin-top:1.2rem">Para agregar o cambiar tareas: Ajustes → Casa y tareas.</p>`;
+    <section class="sheet chores-sheet">${chores.map((c) => choreRow(c, true)).join("")
+      || `<p class="empty-note">Aún no hay tareas. Agreguen la primera: sacar la basura, regar las plantas…</p>`}</section>
+    <div class="bottom-bar"><button class="primary big" id="add-chore">${icon("plus")} Agregar tarea</button></div>`;
   bindBack();
   bindChores(chores, () => go("chores"));
+  $("#add-chore").onclick = () => choreForm();
+  $$("[data-edit-chore]", app).forEach((b) => b.onclick = () => choreForm(chores.find((c) => c.id === +b.dataset.editChore)));
+}
+
+// Agregar o cambiar una tarea desde la tablet: qué es, su dibujo, a quién le toca y cuándo.
+async function choreForm(chore = null) {
+  const members = await safe(() => api("/api/members"));
+  if (!members) return;
+  const c = chore ?? { name: "", emoji: META.chore_emojis[0], member_id: null, rotate: false };
+  const who = c.rotate ? "rotate" : c.member_id ? String(c.member_id) : "";
+  const whoOpts = [["", "Cualquiera"], ["rotate", "Por turnos"], ...members.map((m) => [String(m.id), m.name])];
+  const m = modal({
+    title: chore ? "Cambiar tarea" : "Nueva tarea",
+    body: `<form id="chf" class="stack">
+      <label class="field">¿Qué hay que hacer?<input name="name" required maxlength="80" autocomplete="off"
+        value="${esc(c.name)}" placeholder="Ej: Sacar la basura"></label>
+      <div class="field">Dibujo<div class="pick">${META.chore_emojis.map((e) => `
+        <label title="${esc(CHORE_ICONS[e]?.[1] ?? "")}"><input type="radio" name="emoji" value="${e}" ${e === c.emoji ? "checked" : ""}>
+          <span>${choreIcon(e, 26)}</span></label>`).join("")}</div></div>
+      <div class="field">¿A quién le toca?<div class="seg">${whoOpts.map(([v, t]) => `
+        <label><input type="radio" name="who" value="${v}" ${v === who ? "checked" : ""}><span>${esc(t)}</span></label>`).join("")}</div></div>
+      ${scheduleFields(c)}
+    </form>`,
+    onOpen: (dlg) => bindSchedule($("#chf", dlg)),
+    actions: [
+      ...(chore ? [{ label: "Quitar", tone: "danger", icon: "trash", value: "delete" }] : []),
+      { label: "Cancelar", value: false },
+      {
+        label: chore ? "Guardar" : "Agregar tarea", tone: "primary", icon: chore ? "check" : "plus",
+        onClick: async (dlg) => {
+          const f = $("#chf", dlg);
+          if (!f.reportValidity()) return false;
+          const w = f.who.value;
+          const body = {
+            name: f.name.value.trim(), emoji: f.emoji.value,
+            member_id: w && w !== "rotate" ? +w : null, rotate: w === "rotate", ...readSchedule(f),
+          };
+          const ok = await safe(() => api(chore ? `/api/chores/${chore.id}` : "/api/chores", { method: chore ? "PUT" : "POST", json: body }));
+          if (!ok) return false;
+          toast(chore ? "Tarea guardada" : `Agregada: ${body.name}`);
+          return true;
+        },
+      },
+    ],
+  });
+  const v = await m.done;
+  if (v === "delete") {
+    const ok = await confirmModal({ title: "¿Quitar esta tarea?", text: `«${esc(c.name)}» se borra junto con su historial.`, ok: "Quitar", tone: "danger", okIcon: "trash" });
+    if (!ok) return choreForm(chore);
+    await safe(() => api(`/api/chores/${chore.id}`, { method: "DELETE" }));
+    toast("Tarea quitada");
+  }
+  if (v) go("chores");
 }
 
 // ---------------------------------------------------------------- factura (en una ventana)
@@ -995,6 +1057,340 @@ async function ranOutModal() {
   m.done.then(() => { if (done.size) refresh(); });
 }
 
+// ---------------------------------------------------------------- menú de la semana
+// Su propia página (se entra desde «Hoy en la mesa»): los 7 días con sus comidas, qué falta para
+// cada plato y, con un toque, cambiarlo, quitarlo, decir para quiénes o ponerse a cocinar.
+
+
+async function renderMenu({ start } = {}) {
+  const monday = start ? new Date(`${start}T12:00`) : mondayOf(new Date());
+  const iso = isoDate(monday);
+  const entries = await api(`/api/menu?start=${iso}&days=7`);
+  const todayIso = isoDate(new Date());
+  const meals = [...META.meal_types].sort((a, b) => MEAL_ORDER.indexOf(a) - MEAL_ORDER.indexOf(b));
+  const thisWeek = iso === isoDate(mondayOf(new Date()));
+  const sunday = addDays(monday, 6);
+  const range = `${monday.getDate()} al ${sunday.toLocaleDateString("es", { day: "numeric", month: "long" })}`;
+  const empty = entries.length === 0;
+
+  const plate = (e) => `
+    <button class="plate ${e.cooked ? "done" : ""}" data-entry="${e.id}">
+      <span class="p-name">${esc(e.recipe.name)}</span>
+      <span class="p-state ${e.cooked ? "" : e.can_cook ? "ok" : "miss"}">${e.cooked ? `${icon("check", 16)} Ya se cocinó`
+        : e.can_cook ? `${icon("check", 16)} Tenemos todo` : `Falta: ${esc(e.missing.join(", "))}`}</span>
+      ${e.servings === house().adults && e.kids === house().kids ? ""
+        : `<span class="p-who">${icon("people", 16)} ${esc(peopleText(e.servings, e.kids))}</span>`}
+    </button>`;
+
+  app.innerHTML = `${head("Menú de la semana")}
+    <div class="menu-bar">
+      <div class="week-nav">
+        <button class="round" id="prev" aria-label="Semana anterior">${icon("back", 24)}</button>
+        <strong>${thisWeek ? "Esta semana" : "Semana"} · ${range}</strong>
+        <button class="round" id="next" aria-label="Semana siguiente">${icon("chevron", 24)}</button>
+        ${thisWeek ? "" : `<button id="now">${icon("undo", 18)} Volver a esta semana</button>`}
+      </div>
+      <div class="menu-tools">
+        <button class="${empty ? "primary" : ""}" id="fill">${icon("spark", 20)} ${empty ? "Armar la semana" : "Llenar lo que falta"}</button>
+        <button id="to-list">${icon("basket", 20)} Lista de compras</button>
+      </div>
+    </div>
+    <div class="week">${[...Array(7)].map((_, n) => {
+      const d = addDays(monday, n);
+      const di = isoDate(d);
+      return `<section class="menu-day ${di === todayIso ? "today" : ""} ${di < todayIso ? "past" : ""}" ${di === todayIso ? `id="today"` : ""}>
+        <h2>${esc(cap(d.toLocaleDateString("es", { weekday: "long" })))} <small>${d.getDate()}</small>
+          ${di === todayIso ? `<span class="today-tag">Hoy</span>` : ""}</h2>
+        <div class="slots" style="--n:${meals.length}">${meals.map((m) => {
+          const list = entries.filter((e) => e.day === di && e.meal_type === m);
+          return `<div class="slot">
+            <span class="slot-meal">${icon(MEAL_ICON[m], 18)} ${esc(MEAL_LABEL[m] ?? m)}</span>
+            ${list.map(plate).join("") || `<button class="plate add" data-add="${di}|${m}">${icon("plus", 20)} Agregar</button>`}
+          </div>`;
+        }).join("")}</div>
+      </section>`;
+    }).join("")}</div>`;
+
+  bindBack();
+  const again = () => go("menu", { start: iso });
+  $("#prev").onclick = () => go("menu", { start: isoDate(addDays(monday, -7)) });
+  $("#next").onclick = () => go("menu", { start: isoDate(addDays(monday, 7)) });
+  $("#now")?.addEventListener("click", () => go("menu"));
+  $("#to-list").onclick = () => go("shopping");
+  $("#fill").onclick = (ev) => safe(async () => {
+    const btn = ev.currentTarget;
+    const ok = await confirmModal({
+      title: empty ? "¿Armamos la semana?" : "¿Llenamos lo que falta?",
+      text: "Se ponen sus recetas en las comidas vacías de la semana (desayuno, almuerzo, merienda y cena, según las recetas que tengan para cada una), usando primero lo que ya hay en la casa. Lo que ya está no se toca.",
+      ok: "Sí, llenar", okIcon: "spark",
+    });
+    if (!ok) return;
+    const created = await withBusy(btn, () => api("/api/menu/autoplan", { method: "POST", json: {
+      start: iso, days: 7, meal_types: meals,
+    } }));
+    toast(created.length ? `Se agregaron ${created.length} comidas` : "No quedaron espacios (o faltan recetas en Ajustes)");
+    again();
+  });
+  $$("[data-add]", app).forEach((b) => b.onclick = () => {
+    const [day, meal] = b.dataset.add.split("|");
+    pickRecipeModal({ day, meal }, again);
+  });
+  $$("[data-entry]", app).forEach((b) => b.onclick = () => menuEntryModal(entries.find((e) => e.id === +b.dataset.entry), again));
+  if (thisWeek) $("#today")?.scrollIntoView({ block: "center" });
+}
+
+function menuEntryModal(e, after) {
+  const day = cap(new Date(`${e.day}T12:00`).toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" }));
+  const m = modal({
+    title: esc(e.recipe.name),
+    body: `<p class="m-text">${esc(day)} · ${esc(MEAL_LABEL[e.meal_type] ?? e.meal_type)}</p>
+      <p class="entry-state ${e.cooked ? "" : e.can_cook ? "ok" : "miss"}">${e.cooked ? `${icon("check", 18)} Ya se cocinó`
+        : e.can_cook ? `${icon("check", 18)} Tenemos todo` : `Falta: ${esc(e.missing.join(", "))}`}</p>
+      <div class="field" style="margin-top:1rem">¿Para quiénes?${peoplePicker(e.servings, e.kids, "em-pp")}</div>
+      ${e.cooked ? "" : `<button class="primary big entry-cook" data-cook>${icon("pot")} Ver la receta y cocinar</button>`}`,
+    actions: [
+      { label: "Quitar", tone: "danger", icon: "trash", value: "del" },
+      { label: "Cambiar plato", icon: "undo", value: "swap" },
+      { label: "Listo", tone: "primary", icon: "check", value: "ok" },
+    ],
+  });
+  bindPeople(m.el);
+  $("[data-cook]", m.el)?.addEventListener("click", () => m.close("cook"));
+  m.done.then((v) => safe(async () => {
+    const p = readPeople(m.el);
+    const changed = p.adults !== e.servings || p.kids !== e.kids;
+    if (v && v !== "del" && changed && p.adults + p.kids > 0) {
+      await api(`/api/menu/${e.id}`, { method: "PATCH", json: { servings: p.adults, kids: p.kids } });
+    }
+    if (v === "cook") return go("cook", { recipeId: e.recipe.id, servings: p.adults, kids: p.kids, entryId: e.id });
+    if (v === "swap") return pickRecipeModal({ day: e.day, meal: e.meal_type, entry: e }, after);
+    if (v === "del") {
+      const ok = await confirmModal({ title: "¿Quitar del menú?", text: `«${esc(e.recipe.name)}» se quita de ese día. La receta no se borra.`, ok: "Quitar", tone: "danger", okIcon: "trash" });
+      if (!ok) return;
+      await api(`/api/menu/${e.id}`, { method: "DELETE" });
+      toast("Quitado del menú");
+    }
+    if (v) after();
+  }));
+}
+
+// Elegir qué se come: sus recetas, primero las que se pueden hacer con lo que hay.
+async function pickRecipeModal({ day, meal, entry = null }, after) {
+  const { adults, kids } = entry ? { adults: entry.servings, kids: entry.kids } : house();
+  let sugg = await safe(() => api(`/api/suggestions?meal_type=${encodeURIComponent(meal)}&servings=${adults}&kids=${kids}&limit=40`));
+  if (!sugg) return;
+  // Si ninguna receta está marcada para esa comida, se ofrecen todas (a veces se cena lo del almuerzo).
+  const others = !sugg.length;
+  if (others) sugg = await safe(() => api(`/api/suggestions?servings=${adults}&kids=${kids}&limit=40`)) ?? [];
+  const when = cap(new Date(`${day}T12:00`).toLocaleDateString("es", { weekday: "long", day: "numeric" }));
+  const m = modal({
+    title: entry ? "Cambiar el plato" : `${esc(MEAL_LABEL[meal] ?? meal)} del ${esc(when.toLowerCase())}`,
+    size: "wide",
+    body: sugg.length ? `${others ? `<p class="m-text" style="margin-bottom:.8rem">No tienen recetas marcadas para ${esc((MEAL_LABEL[meal] ?? meal).toLowerCase())}. Estas son todas las de la casa:</p>` : ""}
+      <div class="choices pick-recipe">${sugg.map((s) => `
+      <button class="choice" data-r="${s.recipe.id}">${icon(s.recipe.favorite ? "star" : "pot", 30)}
+        <span><b>${esc(s.recipe.name)}</b>
+          <small class="${s.can_cook ? "ok" : "miss"}">${s.can_cook ? "Tenemos todo" : `Falta: ${esc(s.missing.map((x) => x.name).join(", "))}`}
+          ${s.uses_expiring.length ? ` · aprovecha ${esc(s.uses_expiring.join(", "))}` : ""}</small></span></button>`).join("")}</div>`
+      : `<div class="state-block">${icon("pot", 44)}<h2>Todavía no hay recetas</h2>
+        <p>Se agregan en Ajustes → Recetas.</p></div>`,
+  });
+  $$("[data-r]", m.el).forEach((b) => b.onclick = () => safe(async () => {
+    await withBusy(b, () => entry
+      ? api(`/api/menu/${entry.id}`, { method: "PATCH", json: { recipe_id: +b.dataset.r } })
+      : api("/api/menu", { method: "POST", json: { day, meal_type: meal, recipe_id: +b.dataset.r } }));
+    m.close(true);
+    after();
+  }));
+}
+
+// ---------------------------------------------------------------- ¿qué hay? (revisar la casa)
+// El repaso del fin de semana: con la nevera abierta, grupo por grupo (proteínas, lácteos…),
+// cada cosa se marca como Hay, Poco o Se acabó. Poco y Se acabó pasan a la lista de compras.
+
+const INV_STATES = [
+  ["ok", "Hay", "check"],
+  ["low", "Poco", "half"],
+  ["out", "Se acabó", "close"],
+];
+
+const invState = (i) => (i.quantity <= 0 ? "out" : i.in_list || i.low ? "low" : "ok");
+// En modo tranquilo se piensa en porciones ("para 2 adultos y 1 niño"), no en gramos.
+const prefersPortions = () => META.inventory_mode === "tranquilo";
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+async function renderInventory() {
+  const data = await api("/api/inventory");
+  const withItems = data.groups.filter((g) => g.items.length);
+  const done = withItems.filter((g) => g.reviewed_today).length;
+  const pct = withItems.length ? Math.round((done / withItems.length) * 100) : 0;
+  app.innerHTML = `${head("¿Qué hay en la casa?")}
+    <section class="inv-intro">
+      <p>Abran la nevera y la alacena. Toquen un grupo y marquen cómo está cada cosa.</p>
+      ${withItems.length ? `<div class="inv-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${withItems.length}" aria-valuenow="${done}">
+        <div class="bar"><span style="width:${pct}%"></span></div>
+        <b>${done === withItems.length ? `${icon("check", 20)} Todo revisado hoy` : `Revisados hoy: ${done} de ${withItems.length}`}</b>
+      </div>` : ""}
+    </section>
+    <div class="inv-grid">${data.groups.map((g) => `
+      <button class="inv-card g-${g.key} ${g.reviewed_today ? "seen" : ""} ${g.items.length ? "" : "empty"}" data-g="${g.key}">
+        <span class="inv-ic">${icon(g.icon, 36)}</span>
+        <span class="inv-name">${esc(g.label)}</span>
+        <span class="inv-sub">${g.items.length
+          ? `${plural(g.count, "cosa", "cosas")}${g.out ? ` · <span class="gone">${plural(g.out, "acabada", "acabadas")}</span>` : ""}`
+          : "Vacío"}</span>
+        ${g.reviewed_today ? `<span class="inv-seen" aria-label="Revisado hoy">${icon("check", 20)}</span>` : ""}
+      </button>`).join("")}</div>`;
+  bindBack();
+  $$("[data-g]", app).forEach((b) => b.onclick = () => go("invGroup", { key: b.dataset.g }));
+}
+
+async function renderInvGroup({ key }) {
+  const data = await api("/api/inventory");
+  const g = data.groups.find((x) => x.key === key);
+  const changes = new Map(); // id -> { state, quantity }
+  const stateOf = (i) => changes.get(i.id)?.state ?? invState(i);
+  const qtyOf = (i) => changes.get(i.id)?.quantity ?? i.quantity;
+  const unitOf = (i) => changes.get(i.id)?.unit ?? i.unit;
+  const setChange = (i, patch) => {
+    const prev = changes.get(i.id) ?? {};
+    const next = { state: stateOf(i), quantity: prev.quantity ?? null, unit: prev.unit ?? null, ...patch };
+    const same = next.state === invState(i) && (next.quantity == null || next.quantity === i.quantity)
+      && (next.unit == null || next.unit === i.unit);
+    if (same) changes.delete(i.id);
+    else changes.set(i.id, next);
+  };
+  const ask = (i) => askQty({ ...i, unit: unitOf(i) }, stateOf(i) === "out" ? null : qtyOf(i));
+
+  const row = (i) => {
+    const st = stateOf(i);
+    const q = st === "out" ? 0 : qtyOf(i);
+    return `<div class="inv-row s-${st}" data-id="${i.id}">
+      <button class="inv-what" data-qty aria-label="Cambiar cuánto hay de ${esc(i.name)}">
+        <span class="nm">${esc(i.name)}</span>
+        <span class="amt">${st === "out" ? "No hay" : esc(fmtAmount(q, unitOf(i)))} ${icon("pencil", 16)}</span>
+      </button>
+      <div class="inv-seg" role="radiogroup" aria-label="¿Cómo está ${esc(i.name)}?">
+        ${INV_STATES.map(([s, label, ic]) => `
+          <button class="st-${s} ${st === s ? "on" : ""}" role="radio" aria-checked="${st === s}" data-st="${s}">${icon(ic, 20)}<span>${label}</span></button>`).join("")}
+      </div>
+    </div>`;
+  };
+
+  const draw = () => {
+    const n = changes.size;
+    const toList = [...changes.values()].filter((c) => c.state !== "ok").length;
+    app.innerHTML = `${head(esc(g.label), "Volver a los grupos")}
+      <p class="inv-help">Toquen <b>Hay</b>, <b>Poco</b> o <b>Se acabó</b>. Lo que quede poco o se acabe pasa a la lista de compras.
+        Toquen el nombre para corregir cuánto hay.</p>
+      ${g.items.length ? `<div class="sheet inv-sheet">${g.items.map(row).join("")}</div>`
+        : `<div class="state-block">${icon(g.icon, 48)}<h2>No hay nada anotado aquí</h2><p>Si tienen algo de ${esc(g.label.toLowerCase())}, agréguenlo.</p></div>`}
+      <button class="inv-add" id="add">${icon("plus", 24)} Agregar algo que no está en la lista</button>
+      <div class="bottom-bar">
+        <button class="primary big" id="save">${icon("check")} ${g.items.length ? `Listo con ${esc(g.label.toLowerCase())}` : "Listo"}</button>
+        ${n ? `<span class="inv-count">${plural(n, "cambio", "cambios")}${toList ? ` · ${toList} a la lista de compras` : ""}</span>` : ""}
+      </div>`;
+    bindBack(() => leave());
+    const itemOf = (el) => g.items.find((x) => x.id === +el.closest("[data-id]").dataset.id);
+    $$("[data-st]", app).forEach((b) => b.onclick = () => safe(async () => {
+      const i = itemOf(b);
+      const s = b.dataset.st;
+      // Si estaba acabado y ahora hay, hay que saber cuánto.
+      if (s !== "out" && qtyOf(i) <= 0) {
+        const a = await ask(i);
+        if (!a) return;
+        setChange(i, { state: s, ...a });
+      } else {
+        setChange(i, { state: s });
+      }
+      draw();
+    }));
+    $$("[data-qty]", app).forEach((b) => b.onclick = () => safe(async () => {
+      const i = itemOf(b);
+      const a = await ask(i);
+      if (!a) return;
+      setChange(i, { ...a, state: a.quantity <= 0 ? "out" : stateOf(i) === "out" ? "ok" : stateOf(i) });
+      draw();
+    }));
+    $("#add").onclick = () => safe(async () => {
+      if (await addToGroup(g)) {
+        const fresh = await api("/api/inventory");
+        g.items = fresh.groups.find((x) => x.key === key).items;
+        draw();
+      }
+    });
+    $("#save").onclick = (e) => safe(() => save(e.currentTarget));
+  };
+
+  const save = async (btn) => {
+    const items = [...changes].map(([id, c]) => ({ id, state: c.state, quantity: c.quantity, unit: c.unit }));
+    const res = await withBusy(btn, () => api(`/api/inventory/${key}/review`, { method: "POST", json: { items } }));
+    if (!res) return;
+    toast(res.to_list.length
+      ? `${g.label} al día. A la lista: ${res.to_list.join(", ")}`
+      : `${g.label} al día`, 3600);
+    go("inventory");
+  };
+
+  // Volver sin tocar «Listo»: si marcaron algo, se guarda igual (nada se pierde).
+  const leave = () => safe(async () => {
+    if (changes.size) await save($("#save"));
+    else go("inventory");
+  });
+
+  draw();
+}
+
+function askQty(item, start) {
+  const m = modal({
+    title: esc(item.name), size: "narrow",
+    body: amountForm(item.unit, start, { withUnit: item.unit === PORTION, preferPortions: prefersPortions() }),
+    actions: [
+      { label: "Cancelar", value: null },
+      { label: "Listo", tone: "primary", icon: "check", onClick: (dlg) => readAmountForm(dlg, item.unit) },
+    ],
+  });
+  bindAmountForm(m.el, item.unit);
+  return m.done.then((v) => (v && typeof v === "object" ? v : null));
+}
+
+// Algo que tienen y no estaba anotado: nombre, cuánto y (si el grupo junta varias) de qué tipo.
+function addToGroup(g) {
+  const cats = g.categories;
+  const m = modal({
+    title: `Agregar a ${esc(g.label.toLowerCase())}`,
+    body: `<form id="invf" class="inv-form">
+      <label class="field">¿Qué es?<input name="name" placeholder="Ej: ${esc({ proteinas: "Pechuga de pollo", lacteos: "Yogur", verduras: "Tomate",
+        frutas: "Banano", granos: "Arroz", panaderia: "Pan tajado", despensa: "Atún", congelados: "Arvejas", bebidas: "Jugo",
+        aseo: "Jabón de loza" }[g.key] ?? "Algo")}" autocomplete="off" required></label>
+      <div class="field">¿Cuánto hay?${amountForm(null, null, { withUnit: true, preferPortions: prefersPortions() })}</div>
+      ${cats.length > 1 ? `<div class="field">¿De qué tipo?<div class="inv-kinds">${cats.map((c, n) => `
+        <label><input type="radio" name="category" value="${esc(c)}" ${n === 0 ? "checked" : ""}><span>${esc(cap(c))}</span></label>`).join("")}</div></div>` : ""}
+    </form>`,
+    actions: [
+      { label: "Cancelar", value: false },
+      {
+        label: "Agregar", tone: "primary", icon: "plus",
+        onClick: async (dlg) => {
+          const f = $("#invf", dlg);
+          const name = f.name.value.trim();
+          if (!name) { f.name.focus(); return false; }
+          const amount = readAmountForm(dlg, null);
+          await api("/api/pantry", { method: "POST", json: {
+            name, ...amount, category: f.category?.value ?? cats[0], replace: true,
+          } });
+          toast(`Agregado: ${cap(name)}`);
+          return true;
+        },
+      },
+    ],
+    onOpen: (dlg) => $("[name=name]", dlg).focus(),
+  });
+  bindAmountForm(m.el, null);
+  $("#invf", m.el).onsubmit = (e) => { e.preventDefault(); $("[data-m-act='1']", m.el).click(); };
+  return m.done.then((v) => v === true);
+}
+
 // ---------------------------------------------------------------- lista de compras
 
 const CART_KEY = "mychef-cart";
@@ -1122,20 +1518,24 @@ function stopCookVoice() {
   COOK = null;
 }
 
-async function renderCook({ recipeId, servings, entryId = null, back = null, step = 0 }) {
-  servings = servings || META.household_size;
-  const r = await api(`/api/recipes/${recipeId}?servings=${servings}`);
+async function renderCook({ recipeId, servings, kids, entryId = null, back = null, step = 0 }) {
+  // servings = adultos; kids = niños (comen menos: «Un niño come…» en Ajustes)
+  if (servings == null) ({ adults: servings, kids } = house());
+  kids = kids ?? 0;
+  const r = await api(`/api/recipes/${recipeId}?servings=${servings}&kids=${kids}`);
   const status = Object.fromEntries(r.availability.items.map((i) => [i.ingredient_id, i.status]));
   const steps = r.instructions.split("\n").map((s) => s.replace(/^\s*\d+[.)-]\s*/, "").trim()).filter(Boolean);
   const params = { recipeId, entryId, back };
   const wasHandsFree = Boolean(handsFree?.active);
-  COOK = { recipeId, servings: r.scaled_to, steps, idx: Math.min(step, Math.max(steps.length - 1, 0)), name: r.name };
+  COOK = { recipeId, servings, kids, steps, idx: Math.min(step, Math.max(steps.length - 1, 0)), name: r.name };
   app.innerHTML = `${head(esc(r.name), "Volver",
       VOICE_SUPPORTED ? `<button class="handsfree ${wasHandsFree ? "on" : ""}" id="hf" aria-pressed="${wasHandsFree}">${icon("mic", 22)}<span>Manos libres</span></button>` : "")}
     <p class="hf-hint" id="hf-hint" ${wasHandsFree ? "" : "hidden"}>Escuchando. Digan «<b>siguiente</b>», «<b>repite</b>» o «<b>¿cuánta sal lleva?</b>»</p>
     <div class="servings">Para
-      <button id="minus" aria-label="Menos personas">${icon("minus", 26)}</button><strong>${r.scaled_to}</strong>
-      <button id="plus" aria-label="Más personas">${icon("plus", 26)}</button> personas
+      <span class="who"><button data-who="adults" data-d="-1" aria-label="Menos adultos">${icon("minus", 26)}</button><strong>${servings}</strong>
+        <button data-who="adults" data-d="1" aria-label="Más adultos">${icon("plus", 26)}</button> adulto${servings === 1 ? "" : "s"}</span>
+      <span class="who"><button data-who="kids" data-d="-1" aria-label="Menos niños">${icon("minus", 26)}</button><strong>${kids}</strong>
+        <button data-who="kids" data-d="1" aria-label="Más niños">${icon("plus", 26)}</button> niño${kids === 1 ? "" : "s"}</span>
       ${r.availability.can_cook ? `<span class="badge ok">${icon("check", 16)} Tenemos todo</span>` : ""}
     </div>
     <div class="cook-cols">
@@ -1159,14 +1559,19 @@ async function renderCook({ recipeId, servings, entryId = null, back = null, ste
     </div>
     <div class="bottom-bar"><button class="primary big" id="done">${icon("check")} Terminé de cocinar</button></div>`;
   bindBack(back ? () => go("what", back) : home);
-  $("#minus").onclick = () => r.scaled_to > 1 && go("cook", { ...params, servings: r.scaled_to - 1, step: COOK.idx });
-  $("#plus").onclick = () => go("cook", { ...params, servings: r.scaled_to + 1, step: COOK.idx });
+  $$("[data-who]", app).forEach((b) => b.onclick = () => {
+    const next = { servings, kids };
+    const k = b.dataset.who === "adults" ? "servings" : "kids";
+    next[k] = Math.max(0, next[k] + +b.dataset.d);
+    if (next.servings + next.kids < 1) return;
+    go("cook", { ...params, ...next, step: COOK.idx });
+  });
   $("#prev")?.addEventListener("click", () => showStep(COOK.idx - 1, false));
   $("#next")?.addEventListener("click", () => showStep(COOK.idx + 1, false));
   $$("[data-step]", app).forEach((li) => li.onclick = () => showStep(+li.dataset.step, false));
   $("#hf")?.addEventListener("click", () => toggleHandsFree());
   if (wasHandsFree) setHandsFreeUI(true);
-  $("#done").onclick = (ev) => finishCooking(ev.currentTarget, r, { recipeId, entryId, servings });
+  $("#done").onclick = (ev) => finishCooking(ev.currentTarget, r, { recipeId, entryId, servings, kids });
 }
 
 function showStep(i, read = true) {
@@ -1208,20 +1613,20 @@ function toggleHandsFree() {
   showStep(COOK?.idx ?? 0, true);
 }
 
-async function finishCooking(btn, r, { recipeId, entryId, servings }) {
+async function finishCooking(btn, r, { recipeId, entryId, servings, kids }) {
   await safe(async () => {
     const ok = await confirmModal({
       title: "¿Terminaron de cocinar?",
-      text: `Se descuenta de la casa lo que usa «${esc(r.name)}» para ${r.scaled_to} personas.`,
+      text: `Se descuenta de la casa lo que usa «${esc(r.name)}» para ${peopleText(servings, kids)}.`,
       ok: "Sí, terminé",
     });
     if (!ok) return;
     await withBusy(btn, async () => {
       if (entryId) {
-        if (r.scaled_to !== servings) await api(`/api/menu/${entryId}`, { method: "PATCH", json: { servings: r.scaled_to } });
+        await api(`/api/menu/${entryId}`, { method: "PATCH", json: { servings, kids } });
         await api(`/api/menu/${entryId}/cook`, { method: "POST" });
       } else {
-        await api(`/api/recipes/${recipeId}/cook`, { method: "POST", json: { servings: r.scaled_to } });
+        await api(`/api/recipes/${recipeId}/cook`, { method: "POST", json: { servings, kids } });
       }
     });
     stopCookVoice();
@@ -1325,7 +1730,7 @@ function voiceModal() {
 
 // ---------------------------------------------------------------- palabra de activación («Oye casa»)
 // Escucha continua mientras la pantalla está abierta. Se pausa cuando otro modo usa el micrófono
-// (botón Hablar, manos libres) y vuelve sola. Se activa por dispositivo (queda recordado).
+// (botón Hablar, manos libres) y vuelve sola. Se activa por aparato en Ajustes → Casa y tareas.
 
 const WAKE_KEY = "mychef-wake";
 const wake = { listener: null, ui: null, armTimer: null, holds: new Set(), busy: false };
@@ -1334,17 +1739,6 @@ function wakeEnabled() {
   try { return localStorage.getItem(WAKE_KEY) === "1"; } catch { return false; }
 }
 function wakeWord() { return META?.wake_word || "Oye casa"; }
-
-function wakeButton() {
-  if (!VOICE_SUPPORTED) return "";
-  const on = wakeEnabled();
-  return `<button class="wake-toggle ${on ? "on" : ""}" data-wake aria-pressed="${on}" title="${on ? "Toquen para apagar" : "Toquen para que la casa responda sin tocar la pantalla"}">
-    <span class="dot"></span>${on ? `Digan «${esc(wakeWord())}»` : `Activar «${esc(wakeWord())}»`}</button>`;
-}
-
-function refreshWakeButtons() {
-  $$("[data-wake]").forEach((b) => { b.outerHTML = wakeButton(); });
-}
 
 function startWake() {
   if (!wakeEnabled() || wake.listener || wake.holds.size || !VOICE_SUPPORTED || !VOICE_SECURE) return;
@@ -1357,20 +1751,6 @@ function stopWake() {
 }
 function wakeHold(reason) { wake.holds.add(reason); stopWake(); }
 function wakeRelease(reason) { wake.holds.delete(reason); setTimeout(startWake, 400); }
-
-function toggleWake() {
-  if (wakeEnabled()) {
-    try { localStorage.setItem(WAKE_KEY, "0"); } catch { /* sin almacenamiento */ }
-    stopWake();
-    toast(`«${wakeWord()}» apagado en este dispositivo`);
-  } else {
-    if (!voiceReady()) return;
-    try { localStorage.setItem(WAKE_KEY, "1"); } catch { /* sin almacenamiento */ }
-    startWake();
-    toast(`Listo: digan «${wakeWord()}» y lo que necesiten`, 4000);
-  }
-  refreshWakeButtons();
-}
 
 function wakeOpenUI() {
   if (wake.ui && !wake.ui.closed) return wake.ui;
@@ -1424,7 +1804,6 @@ async function onWakeFinal(text) {
   }
 }
 
-document.addEventListener("click", (e) => { if (e.target.closest("[data-wake]")) toggleWake(); });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") startWake(); else stopWake();
 });
@@ -1442,7 +1821,7 @@ async function runUndo() {
 }
 
 async function handleVoiceText(text, { box = null, handsFree: hf = false } = {}) {
-  const context = { screen, handsfree: hf, ...(COOK ? { recipe_id: COOK.recipeId, servings: COOK.servings } : {}) };
+  const context = { screen, handsfree: hf, ...(COOK ? { recipe_id: COOK.recipeId, servings: COOK.servings, kids: COOK.kids } : {}) };
   let res;
   try {
     res = await api("/api/voice", { method: "POST", json: { text, context } });
@@ -1495,6 +1874,7 @@ async function start() {
     return errorState(start);
   }
   document.title = META.house_name;
+  setHouse(META);
   await loadPhotos();
   await home();
   resetIdle();

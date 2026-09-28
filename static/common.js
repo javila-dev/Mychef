@@ -91,9 +91,119 @@ function kitchenQty(q) {
   if (!hit) return null;
   return whole ? `${whole} ${hit[1]}` : hit[1];
 }
+// ---------------------------------------------------------------- adultos y niños
+// La casa dice cuántos adultos y niños comen y cuánto come un niño (½ de un adulto).
+// Lo que se guarda "por porciones" cuenta porciones de adulto: 2 adultos y 1 niño = 2,5.
+export const PORTION = "porcion";
+const HOUSE = { adults: 4, kids: 0, kid: 0.5 };
+export function setHouse(meta) {
+  HOUSE.adults = meta.household_size ?? HOUSE.adults;
+  HOUSE.kids = meta.household_kids ?? 0;
+  HOUSE.kid = meta.kid_portion ?? 0.5;
+}
+export const house = () => ({ ...HOUSE });
+export const portionsOf = (adults, kids) => adults + kids * HOUSE.kid;
+export function peopleText(adults, kids) {
+  const a = adults ? `${adults} adulto${adults === 1 ? "" : "s"}` : "";
+  const k = kids ? `${kids} niño${kids === 1 ? "" : "s"}` : "";
+  return [a, k].filter(Boolean).join(" y ") || "nadie";
+}
+// Porciones guardadas -> adultos y niños ("para 2 adultos y 1 niño").
+export function splitPortions(q) {
+  const n = Math.max(0, Number(q) || 0);
+  const adults = Math.floor(n + 1e-9);
+  const rest = n - adults;
+  const kids = HOUSE.kid > 0 ? Math.round(rest / HOUSE.kid) : 0;
+  return Math.abs(kids * HOUSE.kid - rest) < 0.01 ? { adults, kids } : null;
+}
+export function fmtPortions(q) {
+  const n = Number(q) || 0;
+  if (n <= 0) return "No hay";
+  const meal = portionsOf(HOUSE.adults, HOUSE.kids);
+  const times = meal > 0 ? n / meal : 0;
+  if (times >= 2 && Math.abs(times - Math.round(times)) < 0.01) return `${Math.round(times)} comidas de la casa`;
+  const p = splitPortions(n);
+  return p ? `Para ${peopleText(p.adults, p.kids)}` : `${fmtQty(n)} porciones`;
+}
+
+// Dos contadores grandes: adultos y niños. Se lee con readPeople().
+export function peoplePicker(adults, kids, id = "pp") {
+  const row = (key, label, v) => `
+    <div class="pp-row"><span class="pp-label">${label}</span>
+      <button type="button" data-pp="${key}" data-d="-1" aria-label="Menos ${label.toLowerCase()}">${icon("minus", 24)}</button>
+      <strong data-pp-v="${key}">${v}</strong>
+      <button type="button" data-pp="${key}" data-d="1" aria-label="Más ${label.toLowerCase()}">${icon("plus", 24)}</button></div>`;
+  return `<div class="people-picker" id="${id}">${row("adults", "Adultos", adults)}${row("kids", "Niños", kids)}</div>`;
+}
+export function bindPeople(root, onChange = null) {
+  $$("[data-pp]", root).forEach((b) => b.onclick = () => {
+    const v = $(`[data-pp-v="${b.dataset.pp}"]`, root);
+    v.textContent = Math.max(0, (+v.textContent || 0) + +b.dataset.d);
+    onChange?.(readPeople(root));
+  });
+}
+export function readPeople(root) {
+  return { adults: +$('[data-pp-v="adults"]', root).textContent || 0, kids: +$('[data-pp-v="kids"]', root).textContent || 0 };
+}
+
+export const AMOUNT_UNITS = ["unidad", "g", "kg", "ml", "l", "lb", "paquete", "bolsa", "caja", "lata", "botella", "tarro"];
+export const unitStep = (unit) => (["g", "ml"].includes(unit) ? 100 : ["kg", "l", "lb"].includes(unit) ? 0.5 : 1);
+
+// ¿Cuánto hay? Se elige en el mismo formulario: por porciones (adultos y niños) o por medida
+// (un contador con − y +). Devuelve { quantity, unit } o null si cancelan.
+export function amountForm(unit, quantity, { withUnit = false, preferPortions = false } = {}) {
+  const byPortions = unit === PORTION || (unit == null && preferPortions);
+  const people = (byPortions && quantity != null && splitPortions(quantity)) || { adults: house().adults, kids: house().kids };
+  const measure = unit && unit !== PORTION ? unit : "unidad";
+  const start = byPortions || quantity == null ? unitStep(measure) : quantity;
+  return `<div class="amount-form" data-mode="${byPortions ? "portions" : "measure"}">
+    <div class="amt-mode" role="radiogroup" aria-label="Cómo contar">
+      <button type="button" role="radio" data-mode="portions" aria-checked="${byPortions}">${icon("people", 20)} Porciones</button>
+      <button type="button" role="radio" data-mode="measure" aria-checked="${!byPortions}">${icon("jar", 20)} Medida</button>
+    </div>
+    <div class="amt-portions">
+      <p class="m-text">¿Para cuántos alcanza?</p>
+      ${peoplePicker(people.adults, people.kids)}
+    </div>
+    <div class="amt-measure">
+      <div class="inv-qty">
+        <button type="button" data-d="-1" aria-label="Menos">${icon("minus", 28)}</button>
+        <label><input class="qv" type="number" inputmode="decimal" step="any" min="0" value="${start}">
+          ${withUnit ? `<select class="qu">${AMOUNT_UNITS.map((u) => `<option ${u === measure ? "selected" : ""}>${u}</option>`).join("")}</select>`
+            : `<span class="qu-txt">${esc(measure)}</span>`}</label>
+        <button type="button" data-d="1" aria-label="Más">${icon("plus", 28)}</button>
+      </div>
+    </div>
+  </div>`;
+}
+export function bindAmountForm(root, unit) {
+  const box = $(".amount-form", root);
+  $$(".amt-mode [data-mode]", box).forEach((b) => b.onclick = () => {
+    box.dataset.mode = b.dataset.mode;
+    $$(".amt-mode [data-mode]", box).forEach((x) => x.setAttribute("aria-checked", String(x === b)));
+  });
+  bindPeople(box);
+  const inp = $(".qv", box);
+  $$("[data-d]", box).forEach((b) => b.onclick = () => {
+    const u = $(".qu", box)?.value ?? (unit && unit !== PORTION ? unit : "unidad");
+    const v = (parseFloat(inp.value) || 0) + unitStep(u) * +b.dataset.d;
+    inp.value = Math.max(0, Math.round(v * 100) / 100);
+  });
+}
+export function readAmountForm(root, unit) {
+  const box = $(".amount-form", root);
+  if (box.dataset.mode === "portions") {
+    const p = readPeople(box);
+    return { quantity: portionsOf(p.adults, p.kids), unit: PORTION };
+  }
+  const u = $(".qu", box)?.value ?? (unit && unit !== PORTION ? unit : "unidad");
+  return { quantity: Math.max(0, parseFloat($(".qv", box).value) || 0), unit: u };
+}
+
 export function fmtAmount(q, unit) {
   const n = Number(q);
   const u = String(unit ?? "");
+  if (u === PORTION) return fmtPortions(n);
   if (!NO_PLURAL.has(u) && n > 0) {
     const k = kitchenQty(n);
     if (k) return `${k} ${fmtUnit(n > 1 ? 2 : 1, u)}`;
@@ -240,6 +350,16 @@ const ICONS = {
   phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.2"/><path d="M11 18.5h2"/>',
   tablet: '<rect x="4" y="3" width="16" height="18" rx="2.2"/><path d="M11 18h2"/>',
   speaker: '<path d="M4.5 9.5h3.5l4.5-4v13l-4.5-4H4.5z"/><path d="M16 9a4.2 4.2 0 0 1 0 6M18.5 6.5a7.8 7.8 0 0 1 0 11"/>',
+  // Grupos del inventario
+  meat: '<path d="M13.2 4.6c3.4-1.4 7.6 2.8 6.2 6.2-1 2.4-3.6 3.6-6 3.2l-3.2 3.2a2 2 0 1 1-2.5 2.5 2 2 0 1 1-2.5-2.5 2 2 0 1 1 2.5-2.5L11 11.5c-.4-2.4.4-5.8 2.2-6.9z"/>',
+  milk: '<path d="M8 8 9.5 3.5h5L16 8v11.5a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1z"/><path d="M8 8h8M8 12.5h8"/>',
+  carrot: '<path d="M16 8 4.5 19.5c1-4 3.5-9.5 6.5-12.5a3.5 3.5 0 0 1 5 1z"/><path d="M16 8c1.5-1.5 3-2 4.5-1.5M16 8c1.5-1.5 2-3 1.5-4.5M8.8 12.2l1.4 1.4M7 15.4l1.1 1.1"/>',
+  grain: '<path d="M12 21V8"/><path d="M12 12c-2.5 0-4-1.5-4-4 2.5 0 4 1.5 4 4zM12 12c2.5 0 4-1.5 4-4-2.5 0-4 1.5-4 4zM12 16.5c-2.5 0-4-1.5-4-4 2.5 0 4 1.5 4 4zM12 16.5c2.5 0 4-1.5 4-4-2.5 0-4 1.5-4 4zM12 8c-1.2-1-1.2-3.5 0-4.5 1.2 1 1.2 3.5 0 4.5z"/>',
+  bread: '<path d="M5.5 11.5A3.5 3.5 0 0 1 7 5h10a3.5 3.5 0 0 1 1.5 6.5v7a1.5 1.5 0 0 1-1.5 1.5H7a1.5 1.5 0 0 1-1.5-1.5z"/><path d="M9.5 9.5v6M14.5 9.5v6"/>',
+  can: '<ellipse cx="12" cy="5.5" rx="6" ry="2"/><path d="M6 5.5v13c0 1.1 2.7 2 6 2s6-.9 6-2v-13M6 9.5c0 1.1 2.7 2 6 2s6-.9 6-2M6 15c0 1.1 2.7 2 6 2s6-.9 6-2"/>',
+  snow: '<path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9M9.5 4.5 12 7l2.5-2.5M9.5 19.5 12 17l2.5 2.5"/>',
+  bottle: '<path d="M10 2.5h4v3.5l1.5 2.5v11a1.5 1.5 0 0 1-1.5 1.5h-4a1.5 1.5 0 0 1-1.5-1.5v-11L10 6z"/><path d="M8.5 12h7"/>',
+  half: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17z" fill="currentColor"/>',
 };
 
 // Las tareas se guardan con un emoji (así las crea Administrar); en pantalla se dibujan con íconos propios.
@@ -324,6 +444,58 @@ export function confirmModal({ title, text = "", ok = "Sí", cancel = "Cancelar"
       { label: ok, tone, value: true, icon: okIcon },
     ],
   }).done.then((v) => v === true);
+}
+
+// ---------------------------------------------------------------- horario de una tarea
+// Lo usan Administrar y la pantalla de la casa (las tareas cambian: se arreglan desde la tablet).
+
+export const DAY_SHORT = ["L", "M", "X", "J", "V", "S", "D"];
+export const DAY_NAMES = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+export const EVERY_OPTS = [[1, "Todos los días"], [2, "Cada 2 días"], [3, "Cada 3 días"], [7, "Cada semana"], [14, "Cada 15 días"], [30, "Cada mes"]];
+
+export function scheduleOf(c) {
+  return {
+    schedule: c.schedule ?? "every", every_days: c.every_days ?? 7, weekdays: c.weekdays ?? [],
+    month_day: c.month_day ?? null, remind_at: c.remind_at ?? null,
+  };
+}
+
+export function scheduleFields(c) {
+  const s = scheduleOf(c);
+  const kinds = [["weekdays", "Días de la semana"], ["every", "Cada ciertos días"], ["monthday", "Un día del mes"]];
+  const everyOpts = EVERY_OPTS.some(([v]) => v === s.every_days) ? EVERY_OPTS : [...EVERY_OPTS, [s.every_days, `Cada ${s.every_days} días`]];
+  return `
+    <div class="field">¿Cuándo toca?
+      <div class="seg">${kinds.map(([k, t]) => `<label><input type="radio" name="schedule" value="${k}" ${k === s.schedule ? "checked" : ""}><span>${t}</span></label>`).join("")}</div>
+    </div>
+    <div data-sch="weekdays" class="field">¿Qué días?
+      <div class="days">${DAY_SHORT.map((d, i) => `<label title="${DAY_NAMES[i]}"><input type="checkbox" name="wd" value="${i}" ${s.weekdays.includes(i) ? "checked" : ""}><span>${d}</span></label>`).join("")}</div>
+    </div>
+    <label data-sch="every" class="field">¿Cada cuánto?<select name="every_days">
+      ${everyOpts.map(([v, t]) => `<option value="${v}" ${v === s.every_days ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+    <label data-sch="monthday" class="field">¿Qué día del mes?<input name="month_day" type="number" min="1" max="31" value="${s.month_day ?? ""}" placeholder="Ej: 1, 15, 30"></label>
+    <label class="field">Recordar en voz alta a las
+      <input name="remind_at" type="time" value="${s.remind_at ?? ""}">
+      <small class="muted">La tablet lo dice en voz alta ese día a esa hora, si nadie la ha hecho. Vacío = sin recordatorio.</small></label>`;
+}
+
+export function bindSchedule(form) {
+  const sync = () => {
+    const kind = form.querySelector("[name=schedule]:checked")?.value ?? "every";
+    $$("[data-sch]", form).forEach((el) => { el.hidden = el.dataset.sch !== kind; });
+  };
+  $$("[name=schedule]", form).forEach((r) => r.onchange = sync);
+  sync();
+}
+
+export function readSchedule(form) {
+  return {
+    schedule: form.querySelector("[name=schedule]:checked")?.value ?? "every",
+    every_days: +form.every_days.value || 7,
+    weekdays: $$("[name=wd]:checked", form).map((i) => +i.value),
+    month_day: form.month_day.value ? +form.month_day.value : null,
+    remind_at: form.remind_at.value || null,
+  };
 }
 
 // ---------------------------------------------------------------- avatares de la familia

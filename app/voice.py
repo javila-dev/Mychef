@@ -491,10 +491,13 @@ def _recipe_question(session: Session, t: str, ctx: dict) -> VoiceResult | None:
     if not recipe:
         return None
     servings = ctx.get("servings") or recipe.servings
-    lines = services.scaled_ingredients(recipe, servings)
+    kids = int(ctx.get("kids") or 0)
+    eaten = services.portions(session, int(servings), kids) if ctx.get("servings") else servings
+    lines = services.scaled_ingredients(recipe, eaten)
     if re.search(r"\b(ingredientes|que lleva|que necesito|que necesitamos)\b", t) and not re.search(r"\bcuant", t):
         said = [f"{_amount(i)} {i['name'].lower()}".strip() for i in lines]
-        return VoiceResult("ingredients", f"Para {servings} personas lleva: {_list(said)}.")
+        who = f"{servings} adultos y {kids} niño{'s' if kids > 1 else ''}" if kids else f"{servings} personas"
+        return VoiceResult("ingredients", f"Para {who} lleva: {_list(said)}.")
     m = re.search(r"\bcuant[oa]s?\s+(?:de\s+)?(.+?)(?:\s+(?:lleva|necesito|necesita|le echo|le pongo|va|van|se usa|hay que))?$", t)
     if not m:
         return None

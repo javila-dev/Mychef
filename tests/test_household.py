@@ -151,7 +151,8 @@ def test_house_name_setting(client):
     assert client.get("/api/meta").json()["house_name"] == "Nuestra casa"
     res = client.put("/api/settings", json={"house_name": "Casa Ávila"}).json()
     res.pop("ai")
-    assert res == {"household_size": 4, "house_name": "Casa Ávila", "wake_word": "Oye casa", "inventory_mode": "normal"}
+    assert res == {"household_size": 4, "household_kids": 0, "kid_portion": 0.5, "house_name": "Casa Ávila",
+                   "wake_word": "Oye casa", "inventory_mode": "normal"}
     client.put("/api/settings", json={"household_size": 5})
     meta = client.get("/api/meta").json()
     assert (meta["house_name"], meta["household_size"]) == ("Casa Ávila", 5)

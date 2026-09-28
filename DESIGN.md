@@ -24,6 +24,8 @@ colors:
   tile-cook-ink: "#9a3412"
   tile-photos-bg: "#efe4f7"
   tile-photos-ink: "#6b2f8f"
+  tile-inv-bg: "#dcf1ef"
+  tile-inv-ink: "#0c5c56"
 typography:
   clock:
     fontFamily: "Lexend, Segoe UI, system-ui, sans-serif"
@@ -124,7 +126,7 @@ Una sola familia, **Lexend** (autoalojada, OFL), elegida por su legibilidad. Rel
 
 ## Layout
 
-Tablet horizontal (1280×800) sin desplazamiento: columna izquierda libre sobre la foto (hora, saludo, fecha y casa, invitación a poner fotos y "Ojo con esto" abajo), columna derecha de 360–440 px con tarjetas ("Hoy en la mesa", "Pendientes de hoy"), y una fila inferior de seis botones: Escanear factura (más ancho), Lista de compras, ¿Qué cocino?, Se acabó algo, Fotos y Ajustes (engranaje). Las tarjetas se desplazan por dentro si no caben; se muestran máximo 3 tareas.
+Tablet horizontal (1280×800) sin desplazamiento: columna izquierda libre sobre la foto (hora, saludo, fecha y casa, invitación a poner fotos y "Ojo con esto" abajo), columna derecha de 360–440 px con tarjetas ("Hoy en la mesa", "Pendientes de hoy"), y abajo una bandeja de dos filas de 4 botones, solo con ícono y título: Lista de compras, ¿Qué cocino?, ¿Qué falta?, ¿Qué hay?, Tareas (verde, con contador de pendientes), Agenda, Fotos y Ajustes. «Escanear» va junto a «Hablar», al lado de la hora; «Oye casa» se activa en Administrar → Casa y tareas. Las tarjetas se desplazan por dentro si no caben; se muestran máximo 3 tareas.
 
 Celular (≤ 760 px): foto arriba (52 vh) con la hora, luego los botones en cuadrícula de 2, luego las tarjetas y al final "Ojo con esto". Pantallas internas: fondo gris, ancho máximo 1180 px, título grande con botón de volver redondo.
 
@@ -139,9 +141,13 @@ Esquinas amplias: 28 px en tarjetas del inicio y ventanas, 24 px en botones de a
 ## Components
 
 - **Tarjeta del inicio**: blanco al 94 % con desenfoque, título con ícono verde.
-- **Hoy en la mesa**: comida en versalitas, línea punteada y plato a la derecha; debajo "Tenemos todo" (verde) o "Falta: …" (terracota).
+- **Hoy en la mesa**: una línea por comida (ícono, plato y estado: ✓, «falta X» / «faltan N» o «ya se cocinó»). La comida que sigue según la hora va resaltada en verde suave y más grande. «Semana ›» arriba a la derecha abre el menú de la semana.
+- **Enlace de tarjeta**: en las tarjetas del inicio, el acceso a la pantalla completa va arriba a la derecha junto al título («Semana ›», «Todas ›», «Agenda ›»), no como botón abajo.
 - **Tarea**: ícono dibujado en círculo verde claro, nombre, "Le toca a" con avatar (inicial en círculo de color por persona) y botón redondo de 56 px para marcar; tocar de nuevo pide confirmar "Deshacer".
-- **Botón de acción**: ícono + nombre + explicación con dato vivo ("11 cosas por comprar"); contador rojo cuando aplica.
+- **Botón de acción**: ícono + nombre, sin explicación (pedido de la familia); contador rojo cuando aplica.
+- **Adultos y niños**: donde se elige para cuántos se cocina hay dos contadores (Adultos, Niños). Un niño come una fracción de un adulto (½ por defecto, en Administrar). Las cantidades del inventario se pueden llevar «por porciones» y se leen «Para 2 adultos y 1 niño».
+- **Menú de la semana**: página propia de la pantalla de la casa (se entra desde «Hoy en la mesa»). Cada día es una tarjeta con sus cuatro comidas (desayuno, almuerzo, merienda y cena); cada plato dice si hay todo o qué falta, y para quiénes solo si no es la casa completa. Tocar un plato: para quiénes, cocinar, cambiar o quitar. Ya no está en Administrar.
+- **¿Qué hay? (revisar la casa)**: tarjetas por grupo (Proteínas, Lácteos y huevos, Verduras…) con ícono en círculo de su tono, cuántas cosas hay y un check verde cuando se revisó hoy; barra de progreso arriba. Dentro de cada grupo, cada cosa con tres botones grandes: Hay (verde), Poco (miel) y Se acabó (rojo). Poco y Se acabó pasan a la lista de compras. El botón del inicio lleva un punto rojo el fin de semana si la casa lleva 6 días o más sin revisar.
 - **Ventanas**: título, X redonda, cuerpo y acciones abajo (Cancelar + acción principal). Toda confirmación y formulario va en ventana.
 - **Botones que guardan** muestran "procesando" y no aceptan doble toque.
 - **Íconos**: dibujados para la app (trazo 1.8, redondeado), nunca emojis en controles.

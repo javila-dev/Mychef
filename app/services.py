@@ -20,7 +20,7 @@ from .models import (
     ingredient_key,
     utcnow,
 )
-from .units import dimension, humanize, normalize_unit, to_base
+from .units import PORTION, dimension, humanize, normalize_unit, to_base
 
 EXPIRING_DAYS = 3
 
@@ -56,8 +56,39 @@ def get_or_create_ingredient(
 
 
 def household_size(session: Session) -> int:
+    """Adultos de la casa (antes: personas en total; si no dicen niños, es lo mismo)."""
     s = session.get(Setting, "household_size")
     return int(s.value) if s else 4
+
+
+def household_kids(session: Session) -> int:
+    s = session.get(Setting, "household_kids")
+    return int(s.value) if s else 0
+
+
+# Cuánto come un niño comparado con un adulto (½ = media porción).
+DEFAULT_KID_PORTION = 0.5
+
+
+def kid_portion(session: Session) -> float:
+    s = session.get(Setting, "kid_portion")
+    try:
+        return float(s.value) if s else DEFAULT_KID_PORTION
+    except ValueError:
+        return DEFAULT_KID_PORTION
+
+
+def portions(session: Session, adults: int | None = None, kids: int | None = None) -> float:
+    """Porciones de adulto que se sirven: 2 adultos y 1 niño que come ½ = 2,5.
+    Sin datos, la casa completa."""
+    if adults is None:
+        adults = household_size(session)
+        kids = household_kids(session) if kids is None else kids
+    return adults + (kids or 0) * kid_portion(session)
+
+
+def entry_portions(session: Session, entry: MenuEntry) -> float:
+    return portions(session, entry.servings, entry.kids or 0)
 
 
 # ---------------------------------------------------------------- despensa
@@ -164,6 +195,10 @@ def check_availability(recipe: Recipe, servings: int | None, pantry: Pantry) -> 
         else:
             entry["have"], entry["have_unit"] = round(stock.quantity, 2), stock.unit
             have = ri.ingredient.convert(stock.quantity, stock.unit, ing["unit"])
+            if normalize_unit(stock.unit) == PORTION:
+                # Guardado por porciones ("cerdo para 2 adultos y 1 niño"): alcanza para esas porciones.
+                need = servings or recipe.servings
+                have = ing["quantity"] * min(stock.quantity / need, 1.0) if need else ing["quantity"]
             if have is None:
                 entry["status"] = "hay"  # unidades no comparables: hay algo, sin saber cuánto
             elif have + 1e-9 >= ing["quantity"]:
@@ -198,7 +233,10 @@ def consume(pantry: Pantry, recipe: Recipe, servings: int | None) -> None:
         stock = pantry.get(ing["ingredient_id"])
         if stock is None:
             continue
-        used = ri.ingredient.convert(ing["quantity"], ing["unit"], stock.unit)
+        if normalize_unit(stock.unit) == PORTION:
+            used = servings or recipe.servings  # se comen esas porciones
+        else:
+            used = ri.ingredient.convert(ing["quantity"], ing["unit"], stock.unit)
         if used is not None:
             stock.quantity = max(0.0, round(stock.quantity - used, 3))
 
@@ -224,7 +262,7 @@ def suggest(
     """Ordena las recetas de la casa según lo que hay, lo que vence pronto y la variedad."""
     today = today or clock.today()
     pantry = pantry if pantry is not None else load_pantry(session)
-    servings = servings or household_size(session)
+    servings = servings or portions(session)
     avoid = avoid or {}  # receta -> veces ya planeada en el periodo
     cooked = last_cooked(session)
     expiring = {
@@ -266,11 +304,13 @@ def suggest(
     return ranked[:limit]
 
 
-def cook(session: Session, recipe: Recipe, servings: int, day: dt.date | None = None) -> list[dict]:
-    """Registra que se cocinó y descuenta de la despensa real."""
+def cook(
+    session: Session, recipe: Recipe, servings: int, day: dt.date | None = None, kids: int = 0
+) -> list[dict]:
+    """Registra que se cocinó (servings = adultos, más los niños) y descuenta de la despensa real."""
     pantry = load_pantry(session)
     before = {k: v.quantity for k, v in pantry.items()}
-    consume(pantry, recipe, servings)
+    consume(pantry, recipe, portions(session, servings, kids))
     changes = []
     for item in session.exec(select(PantryItem)):
         new_qty = pantry[item.ingredient_id].quantity
@@ -284,7 +324,7 @@ def cook(session: Session, recipe: Recipe, servings: int, day: dt.date | None = 
             item.quantity = new_qty
             item.updated_at = utcnow()
             session.add(item)
-    session.add(CookLog(recipe_id=recipe.id, servings=servings, day=day or clock.today()))
+    session.add(CookLog(recipe_id=recipe.id, servings=servings, kids=kids, day=day or clock.today()))
     session.flush()
     return changes
 
@@ -298,9 +338,15 @@ def autoplan(
     meal_types: list[str],
     servings: int | None = None,
     overwrite: bool = False,
+    kids: int | None = None,
 ) -> list[MenuEntry]:
-    """Llena el menú de la semana con recetas de la casa, gastando primero lo que hay."""
-    servings = servings or household_size(session)
+    """Llena el menú de la semana con recetas de la casa, gastando primero lo que hay.
+    servings = adultos; kids = niños (por defecto, los de la casa)."""
+    if servings is None:
+        servings = household_size(session)
+        kids = household_kids(session) if kids is None else kids
+    kids = kids or 0
+    eaten = portions(session, servings, kids)
     end = start + dt.timedelta(days=days - 1)
     existing = session.exec(
         select(MenuEntry).where(MenuEntry.day >= start, MenuEntry.day <= end)
@@ -318,7 +364,7 @@ def autoplan(
     pantry = load_pantry(session)
     for e in existing:
         if not e.cooked:
-            consume(pantry, e.recipe, e.servings)
+            consume(pantry, e.recipe, entry_portions(session, e))
 
     created = []
     for offset in range(days):
@@ -327,17 +373,17 @@ def autoplan(
             if (day, meal) in taken:
                 continue
             options = suggest(
-                session, meal_type=meal, servings=servings, pantry=pantry,
+                session, meal_type=meal, servings=eaten, pantry=pantry,
                 avoid=used, today=day, limit=1,
             )
             if not options:
                 continue
             recipe = session.get(Recipe, options[0]["recipe"]["id"])
-            entry = MenuEntry(day=day, meal_type=meal, recipe_id=recipe.id, servings=servings)
+            entry = MenuEntry(day=day, meal_type=meal, recipe_id=recipe.id, servings=servings, kids=kids)
             session.add(entry)
             created.append(entry)
             used[recipe.id] = used.get(recipe.id, 0) + 1
-            consume(pantry, recipe, servings)
+            consume(pantry, recipe, eaten)
     session.flush()
     return created
 
@@ -361,7 +407,8 @@ def shopping_list(session: Session, start: dt.date, end: dt.date) -> list[dict]:
     info: dict[int, Ingredient] = {}
     used_in: dict[int, set[str]] = {}
     for e in entries:
-        for ri, ing in zip(e.recipe.ingredients, scaled_ingredients(e.recipe, e.servings)):
+        eaten = entry_portions(session, e)
+        for ri, ing in zip(e.recipe.ingredients, scaled_ingredients(e.recipe, eaten)):
             if ing["optional"] or not ing["quantity"]:
                 continue
             iid, ingredient = ing["ingredient_id"], ri.ingredient
@@ -371,6 +418,8 @@ def shopping_list(session: Session, start: dt.date, end: dt.date) -> list[dict]:
             used_in.setdefault(iid, set()).add(e.recipe.name)
             stock = pantry.get(iid)
             qty = ingredient.convert(ing["quantity"], ing["unit"], stock.unit) if stock else None
+            if stock and normalize_unit(stock.unit) == PORTION:
+                qty = eaten  # se lleva la cuenta en porciones
             if qty is not None:
                 key = (iid, normalize_unit(stock.unit))
             else:
@@ -390,7 +439,7 @@ def shopping_list(session: Session, start: dt.date, end: dt.date) -> list[dict]:
         base_missing, base_unit = to_base(missing, unit)
         base_needed, _ = to_base(qty, unit)
         q, u = humanize(base_missing, base_unit)
-        if dimension(u) not in ("masa", "volumen"):
+        if dimension(u) not in ("masa", "volumen") and u != PORTION:
             q = math.ceil(q - 1e-6)  # no se compran 2,3 cebollas
         nq, nu = humanize(base_needed, base_unit)
         ing = info[iid]

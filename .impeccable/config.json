@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "design-system-font-size",
+        "value": "1rem",
+        "createdAt": "2026-09-28T13:52:03.357Z",
+        "reason": "user confirmed: pidió bajar el nombre de los platos del menú (antes 1.1rem); 1rem queda entre el cuerpo (18px) y la etiqueta (.88rem)"
+      }
+    ]
+  }
+}

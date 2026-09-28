@@ -120,7 +120,8 @@ class MenuEntry(SQLModel, table=True):
     day: dt.date = Field(index=True)
     meal_type: str
     recipe_id: int = Field(foreign_key="recipe.id")
-    servings: int
+    servings: int  # adultos
+    kids: int = 0  # niños (comen una porción más pequeña, ver services.kid_portion)
     cooked: bool = False
 
     recipe: Recipe = Relationship()
@@ -130,7 +131,8 @@ class CookLog(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     recipe_id: int = Field(foreign_key="recipe.id", index=True)
     day: dt.date = Field(default_factory=clock.today)
-    servings: int
+    servings: int  # adultos
+    kids: int = 0
 
 
 class Setting(SQLModel, table=True):

@@ -307,11 +307,12 @@ def today_summary(session: Session, today: dt.date | None = None) -> dict:
     pantry = services.load_pantry(session)
     meals = []
     for e in sorted(menu, key=lambda e: services.MEAL_ORDER.get(e.meal_type, 9)):
-        avail = services.check_availability(e.recipe, e.servings, pantry)
+        avail = services.check_availability(e.recipe, services.entry_portions(session, e), pantry)
         meals.append({
             "id": e.id,
             "meal_type": e.meal_type,
             "servings": e.servings,
+            "kids": e.kids or 0,
             "cooked": e.cooked,
             "can_cook": avail["can_cook"],
             "missing": [i["name"] for i in avail["items"]

@@ -14,15 +14,19 @@
       <a class="btn" href="/" title="Volver a la pantalla de la casa" id="home-link">Casa</a>
       <h1><span id="house-title">Nuestra casa</span><small>Administrar</small></h1>
     </div>
-    <label class="household">Personas en casa
-      <input id="household" type="number" min="1" max="50" value="4">
-    </label>
+    <div class="household" role="group" aria-label="Quiénes comen en casa">
+      <label>Adultos <input id="household" type="number" min="1" max="50" value="2"></label>
+      <label>Niños <input id="household-kids" type="number" min="0" max="20" value="0"></label>
+      <label>Un niño come
+        <select id="kid-portion">
+          <option value="0.25">¼</option><option value="0.5">½</option><option value="0.75">¾</option><option value="1">igual</option>
+        </select></label>
+    </div>
   </header>
 
   <nav class="tabs" role="tablist">
-    <button data-view="menu" class="active">Menú</button>
+    <button data-view="recipes" class="active">Recetas</button>
     <button data-view="cook">¿Qué cocino?</button>
-    <button data-view="recipes">Recetas</button>
     <button data-view="pantry">Despensa</button>
     <button data-view="shopping">Compras</button>
     <button data-view="house">Casa y tareas</button>

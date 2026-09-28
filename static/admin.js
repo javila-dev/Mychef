@@ -2,10 +2,14 @@
 
 import {
   $, $$, REASON_TEXT, addDays, api, cap, esc, fmtDay, fmtMoney, fmtQty, isoDate, mondayOf, safe,
-  CHORE_ICONS, avatar, choreIcon, compressImage, confirmModal, fmtAmount, fmtUnit, icon, modal as formModal,
-  toPantryLine, toast, withBusy,
+  CHORE_ICONS, amountForm, avatar, bindAmountForm, choreIcon, compressImage, confirmModal, fmtAmount, fmtUnit, house,
+  icon, modal as formModal, peopleText, readAmountForm, setHouse, toPantryLine, toast, withBusy,
+  bindSchedule, readSchedule, scheduleFields, scheduleOf,
 } from "./common.js";
-import { getVoicePrefs, onVoicesReady, setVoicePrefs, speak } from "./voice.js";
+import { VOICE_SUPPORTED, getVoicePrefs, onVoicesReady, setVoicePrefs, speak } from "./voice.js";
+
+// «Oye casa» se activa por aparato; la pantalla de la casa lee esta misma marca al abrir.
+const WAKE_KEY = "mychef-wake";
 
 const view = $("#view");
 const modal = $("#modal");
@@ -33,8 +37,8 @@ modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); }
 
 // ------------------------------------------------------------------ navegación
 
-const VIEWS = { menu: renderMenu, cook: renderCook, recipes: renderRecipes, pantry: renderPantry, shopping: renderShopping, house: renderHouse };
-let current = "menu";
+const VIEWS = { cook: renderCook, recipes: renderRecipes, pantry: renderPantry, shopping: renderShopping, house: renderHouse };
+let current = "recipes";
 
 function go(name) {
   current = name;
@@ -44,131 +48,29 @@ function go(name) {
 $$(".tabs button").forEach((b) => b.addEventListener("click", () => go(b.dataset.view)));
 function refresh() { safe(VIEWS[current]); }
 
-$("#household").addEventListener("change", (e) => safe(async () => {
-  const n = parseInt(e.target.value, 10);
-  if (!n || n < 1) return;
-  await api("/api/settings", { method: "PUT", json: { household_size: n } });
-  META.household_size = n;
-  toast(`Porciones por defecto: ${n}`);
+// Quiénes comen en casa: adultos y niños (un niño come una porción más pequeña).
+function whoFields(prefix, adults, kids) {
+  return `<label class="field">Adultos<input id="${prefix}-a" type="number" min="0" value="${adults}" style="width:5rem"></label>
+    <label class="field">Niños<input id="${prefix}-k" type="number" min="0" value="${kids}" style="width:5rem"></label>`;
+}
+function readWho(prefix) {
+  const adults = Math.max(0, parseInt($(`#${prefix}-a`).value, 10) || 0);
+  const kids = Math.max(0, parseInt($(`#${prefix}-k`).value, 10) || 0);
+  return adults + kids ? { servings: adults, kids } : { servings: null, kids: null };
+}
+
+$$("#household, #household-kids, #kid-portion").forEach((inp) => inp.addEventListener("change", () => safe(async () => {
+  const adults = parseInt($("#household").value, 10);
+  const kids = parseInt($("#household-kids").value, 10) || 0;
+  if (!adults || adults < 1) return;
+  const res = await api("/api/settings", { method: "PUT", json: {
+    household_size: adults, household_kids: kids, kid_portion: parseFloat($("#kid-portion").value),
+  } });
+  Object.assign(META, res);
+  setHouse(META);
+  toast(`En casa comen ${peopleText(adults, kids)}`);
   refresh();
-}));
-
-// ------------------------------------------------------------------ menú semanal
-
-async function renderMenu() {
-  const start = isoDate(weekStart);
-  const entries = await api(`/api/menu?start=${start}&days=7`);
-  const today = isoDate(new Date());
-  const days = [...Array(7)].map((_, i) => addDays(weekStart, i));
-
-  view.innerHTML = `
-    <div class="row spread" style="margin-bottom:.75rem">
-      <div class="row">
-        <button id="prev" aria-label="Semana anterior">${icon("back", 20)}</button>
-        <strong>Semana del ${weekStart.toLocaleDateString("es", { day: "numeric", month: "long" })}</strong>
-        <button id="next" aria-label="Semana siguiente">${icon("chevron", 20)}</button>
-        <button class="ghost" id="thisweek">Hoy</button>
-      </div>
-      <div class="row">
-        <button class="primary" id="autoplan">${icon("spark", 20)} Planear con lo que hay</button>
-        <button id="to-shopping">${icon("basket", 20)} Lista de compras</button>
-      </div>
-    </div>
-    <div class="week">
-      ${days.map((d) => {
-        const iso = isoDate(d);
-        return `<section class="card day ${iso === today ? "today" : ""}">
-          <h3>${esc(fmtDay(d))}</h3>
-          ${META.meal_types.map((m) => {
-            const list = entries.filter((e) => e.day === iso && e.meal_type === m);
-            return `<div class="slot">
-              <div class="row spread"><span class="slot-title">${esc(m)}</span>
-                <button class="ghost small" data-add="${iso}|${m}" title="Agregar">${icon("plus", 18)}</button></div>
-              ${list.map((e) => `
-                <div class="entry ${e.cooked ? "cooked" : ""}">
-                  <a data-recipe="${e.recipe.id}" data-servings="${e.servings}">${esc(e.recipe.name)}</a>
-                  <span class="muted small">${e.servings}p</span>
-                  ${e.cooked ? `<span class="badge ok">hecho</span>` : `<button title="Ya lo cociné: descontar de la despensa" data-cook="${e.id}">${icon("check", 18)}</button>`}
-                  <button class="ghost danger" title="Quitar" data-del="${e.id}">${icon("close", 18)}</button>
-                </div>`).join("")}
-            </div>`;
-          }).join("")}
-        </section>`;
-      }).join("")}
-    </div>`;
-
-  $("#prev").onclick = () => { weekStart = addDays(weekStart, -7); refresh(); };
-  $("#next").onclick = () => { weekStart = addDays(weekStart, 7); refresh(); };
-  $("#thisweek").onclick = () => { weekStart = mondayOf(new Date()); refresh(); };
-  $("#to-shopping").onclick = () => go("shopping");
-  $("#autoplan").onclick = autoplanDialog;
-  $$("[data-add]", view).forEach((b) => b.onclick = () => {
-    const [day, meal] = b.dataset.add.split("|");
-    pickRecipeDialog(day, meal);
-  });
-  $$("[data-recipe]", view).forEach((a) => a.onclick = () => showRecipe(+a.dataset.recipe, +a.dataset.servings));
-  $$("[data-del]", view).forEach((b) => b.onclick = () => safe(async () => {
-    if (!await confirmModal({ title: "¿Quitar del menú?", text: "Solo se quita de ese día; la receta no se borra.", ok: "Quitar", tone: "danger", okIcon: "trash" })) return;
-    await api(`/api/menu/${b.dataset.del}`, { method: "DELETE" });
-    refresh();
-  }));
-  $$("[data-cook]", view).forEach((b) => b.onclick = () => safe(async () => {
-    const res = await api(`/api/menu/${b.dataset.cook}/cook`, { method: "POST" });
-    toast(res.pantry_changes.length ? `Despensa actualizada (${res.pantry_changes.length} ingredientes)` : "Marcado como cocinado");
-    refresh();
-  }));
-}
-
-function autoplanDialog() {
-  openModal(`
-    <div class="modal-head"><h2>Planear la semana</h2><button class="m-x" id="x" aria-label="Cerrar">${icon("close")}</button></div>
-    <p class="muted">Llena los espacios vacíos con sus recetas, priorizando lo que ya hay en la despensa,
-      lo que está por vencerse y lo que hace rato no cocinan. No toca lo que ya planearon.</p>
-    <div class="stack">
-      <div class="row">${META.meal_types.map((m) => `
-        <label class="row"><input type="checkbox" name="meal" value="${m}" ${["almuerzo", "cena"].includes(m) ? "checked" : ""}> ${cap(m)}</label>`).join("")}
-      </div>
-      <label class="field">Porciones<input id="ap-serv" type="number" min="1" value="${META.household_size}"></label>
-      <label class="row"><input type="checkbox" id="ap-over"> Reemplazar lo planeado que aún no se ha cocinado</label>
-      <div class="row"><button class="primary" id="go">Planear</button></div>
-    </div>`);
-  $("#x").onclick = closeModal;
-  $("#go").onclick = (ev) => safe(() => withBusy(ev.currentTarget, async () => {
-    const meals = $$("input[name=meal]:checked", modalBody).map((i) => i.value);
-    if (!meals.length) return toast("Elige al menos una comida");
-    const created = await api("/api/menu/autoplan", {
-      method: "POST",
-      json: { start: isoDate(weekStart), days: 7, meal_types: meals, servings: +$("#ap-serv").value || null, overwrite: $("#ap-over").checked },
-    });
-    closeModal();
-    toast(created.length ? `Se agregaron ${created.length} comidas` : "No hay recetas para esos espacios (o ya están llenos)");
-    refresh();
-  }));
-}
-
-async function pickRecipeDialog(day, meal) {
-  const sugg = await api(`/api/suggestions?meal_type=${encodeURIComponent(meal)}&limit=50`);
-  openModal(`
-    <div class="modal-head"><h2>${esc(cap(meal))} · ${esc(fmtDay(new Date(day + "T12:00")))}</h2><button class="m-x" id="x" aria-label="Cerrar">${icon("close")}</button></div>
-    <label class="field" style="max-width:10rem">Porciones<input id="pk-serv" type="number" min="1" value="${META.household_size}"></label>
-    ${sugg.length ? `<ul class="clean" style="margin-top:.5rem">${sugg.map((s) => `
-      <li class="row spread">
-        <div style="flex:1;min-width:12rem">
-          <strong>${esc(s.recipe.name)}</strong> <span class="badge">${esc(s.recipe.dish_type)}</span>
-          ${s.uses_expiring.length ? `<span class="badge warn">usa lo que vence</span>` : ""}
-          ${coverageBar(s.coverage)}
-          <div class="small muted">${s.can_cook ? "Hay todo" : "Falta: " + esc(s.missing.map((m) => m.name).join(", "))}</div>
-        </div>
-        <button class="primary" data-pick="${s.recipe.id}">Elegir</button>
-      </li>`).join("")}</ul>`
-      : `<p class="empty">No tienen recetas marcadas para ${esc(meal)}. Agrégalas en la pestaña Recetas.</p>`}`);
-  $("#x").onclick = closeModal;
-  $$("[data-pick]", modalBody).forEach((b) => b.onclick = () => safe(() => withBusy(b, async () => {
-    await api("/api/menu", { method: "POST", json: { day, meal_type: meal, recipe_id: +b.dataset.pick, servings: +$("#pk-serv").value || null } });
-    closeModal();
-    refresh();
-  })));
-}
+})));
 
 // ------------------------------------------------------------------ ¿qué cocino?
 
@@ -176,7 +78,8 @@ async function renderCook(filters = {}) {
   const meal = filters.meal ?? guessMeal();
   const dish = filters.dish ?? "";
   const servings = filters.servings ?? META.household_size;
-  const params = new URLSearchParams({ servings, limit: 30 });
+  const kids = filters.kids ?? META.household_kids;
+  const params = new URLSearchParams({ servings, kids, limit: 30 });
   if (meal) params.set("meal_type", meal);
   if (dish) params.set("dish_type", dish);
   const sugg = await api(`/api/suggestions?${params}`);
@@ -185,7 +88,7 @@ async function renderCook(filters = {}) {
     <div class="card row" style="margin-bottom:.75rem">
       <label class="field">Comida<select id="f-meal">${options(META.meal_types, meal, "Cualquiera")}</select></label>
       <label class="field">Tipo de plato<select id="f-dish">${options(META.dish_types, dish, "Todos")}</select></label>
-      <label class="field">Porciones<input id="f-serv" type="number" min="1" value="${servings}" style="width:5rem"></label>
+      ${whoFields("f", servings, kids)}
     </div>
     ${sugg.length ? `<div class="grid">${sugg.map((s) => `
       <article class="card stack">
@@ -199,15 +102,19 @@ async function renderCook(filters = {}) {
         ${coverageBar(s.coverage)}
         ${s.missing.length ? `<div class="small">Falta: ${s.missing.map((m) => `${esc(m.name)} (${fmtQty(m.quantity)} ${esc(fmtUnit(m.quantity, m.unit))})`).join(", ")}</div>` : ""}
         <div class="small muted">${s.last_cooked ? `Última vez: ${new Date(s.last_cooked + "T12:00").toLocaleDateString("es")}` : "Aún no la han registrado"}</div>
-        <div><button data-open="${s.recipe.id}">Ver receta para ${s.servings}</button></div>
+        <div><button data-open="${s.recipe.id}">Ver receta para ${esc(peopleText(servings, kids))}</button></div>
       </article>`).join("")}</div>`
       : `<div class="empty card">No hay recetas para ese filtro. Empieza cargando sus recetas en la pestaña <b>Recetas</b>.</div>`}`;
 
-  const reload = () => safe(() => renderCook({ meal: $("#f-meal").value, dish: $("#f-dish").value, servings: +$("#f-serv").value || META.household_size }));
+  const reload = () => safe(() => {
+    const w = readWho("f");
+    return renderCook({ meal: $("#f-meal").value, dish: $("#f-dish").value, servings: w.servings ?? undefined, kids: w.kids ?? undefined });
+  });
   $("#f-meal").onchange = reload;
   $("#f-dish").onchange = reload;
-  $("#f-serv").onchange = reload;
-  $$("[data-open]", view).forEach((b) => b.onclick = () => showRecipe(+b.dataset.open, +$("#f-serv").value));
+  $("#f-a").onchange = reload;
+  $("#f-k").onchange = reload;
+  $$("[data-open]", view).forEach((b) => b.onclick = () => showRecipe(+b.dataset.open, servings, kids));
 }
 
 function guessMeal() {
@@ -260,8 +167,10 @@ async function renderRecipes(filters = {}) {
 const STATUS_ICON = { ok: ["check", "st-ok"], hay: ["check", "st-ok"], justo: ["check", "st-ok"], basico: ["check", "st-basic"], poco: ["dot", "st-poco"], falta: ["close", "st-falta"] };
 const STATUS_TEXT = { ok: "hay suficiente", hay: "hay, pero en otra unidad: agrega su equivalencia en la despensa", justo: "hay casi todo: alcanza", basico: "básico: se da por hecho que hay", poco: "no alcanza", falta: "no hay" };
 
-async function showRecipe(id, servings) {
-  const r = await api(`/api/recipes/${id}${servings ? `?servings=${servings}` : ""}`);
+async function showRecipe(id, adults, kids) {
+  if (adults == null) ({ adults, kids } = house());
+  kids = kids || 0;
+  const r = await api(`/api/recipes/${id}?servings=${adults}&kids=${kids}`);
   const byId = Object.fromEntries(r.availability.items.map((i) => [i.ingredient_id, i]));
   openModal(`
     <div class="modal-head">
@@ -269,13 +178,15 @@ async function showRecipe(id, servings) {
         <div class="row small">${r.meal_types.map((m) => `<span class="badge accent">${esc(m)}</span>`).join("")}
           <span class="badge">${esc(r.dish_type)}</span>
           ${r.prep_minutes ? `<span class="muted">${icon("clock", 16)} ${r.prep_minutes} min</span>` : ""}
-          <span class="muted">Receta original: ${r.servings} porciones</span></div></div>
+          <span class="muted">Receta original: ${r.servings} porciones de adulto</span></div></div>
       <button class="m-x" id="x" aria-label="Cerrar">${icon("close")}</button>
     </div>
     <div class="row" style="margin:.75rem 0">
       <span>Para</span>
-      <button id="minus" aria-label="Menos">${icon("minus", 18)}</button><strong id="serv">${r.scaled_to}</strong><button id="plus" aria-label="Más">${icon("plus", 18)}</button>
-      <span>porciones</span>
+      <button data-w="a" data-d="-1" aria-label="Menos adultos">${icon("minus", 18)}</button><strong>${adults}</strong><button data-w="a" data-d="1" aria-label="Más adultos">${icon("plus", 18)}</button>
+      <span>adulto${adults === 1 ? "" : "s"}</span>
+      <button data-w="k" data-d="-1" aria-label="Menos niños">${icon("minus", 18)}</button><strong>${kids}</strong><button data-w="k" data-d="1" aria-label="Más niños">${icon("plus", 18)}</button>
+      <span>niño${kids === 1 ? "" : "s"}</span>
       ${r.factor !== 1 ? `<span class="badge">× ${fmtQty(r.factor)}</span>` : ""}
       ${r.availability.can_cook ? `<span class="badge ok">Hay todo en casa</span>` : `<span class="badge bad">Faltan ${r.availability.missing_count}</span>`}
     </div>
@@ -286,7 +197,7 @@ async function showRecipe(id, servings) {
         <strong>${i.quantity ? esc(fmtAmount(i.quantity, i.unit)) : ""}</strong> ${esc(i.name)}
         ${i.note ? `<span class="muted">— ${esc(i.note)}</span>` : ""}
         ${i.optional ? `<span class="badge">opcional</span>` : ""}
-        ${a.have != null ? `<span class="muted small">(hay ${fmtQty(a.have)} ${esc(a.have_unit)})</span>` : ""}</li>`;
+        ${a.have != null ? `<span class="muted small">(hay: ${esc(fmtAmount(a.have, a.have_unit).replace(/^Para /, "para "))})</span>` : ""}</li>`;
     }).join("")}</ul>
     ${r.instructions ? `<h3>Preparación</h3><div class="instructions">${esc(r.instructions)}</div>` : ""}
     ${r.notes ? `<h3>Notas de la casa</h3><div class="instructions muted">${esc(r.notes)}</div>` : ""}
@@ -296,10 +207,12 @@ async function showRecipe(id, servings) {
       <button class="danger" id="del">Eliminar</button>
     </div>`);
 
-  const n = r.scaled_to;
   $("#x").onclick = closeModal;
-  $("#minus").onclick = () => n > 1 && safe(() => showRecipe(id, n - 1));
-  $("#plus").onclick = () => safe(() => showRecipe(id, n + 1));
+  $$("[data-w]", modalBody).forEach((b) => b.onclick = () => {
+    const a = Math.max(0, adults + (b.dataset.w === "a" ? +b.dataset.d : 0));
+    const k = Math.max(0, kids + (b.dataset.w === "k" ? +b.dataset.d : 0));
+    if (a + k >= 1) safe(() => showRecipe(id, a, k));
+  });
   $("#edit").onclick = () => safe(async () => recipeForm(await api(`/api/recipes/${id}`)));
   $("#del").onclick = () => safe(async () => {
     if (!await confirmModal({ title: "¿Eliminar la receta?", text: `«${esc(r.name)}» se borra y también se quita del menú.`, ok: "Eliminar", tone: "danger", okIcon: "trash" })) return;
@@ -308,7 +221,7 @@ async function showRecipe(id, servings) {
     refresh();
   });
   $("#cooked").onclick = (ev) => safe(() => withBusy(ev.currentTarget, async () => {
-    const res = await api(`/api/recipes/${id}/cook`, { method: "POST", json: { servings: n } });
+    const res = await api(`/api/recipes/${id}/cook`, { method: "POST", json: { servings: adults, kids } });
     toast(`Registrado. Se descontaron ${res.pantry_changes.length} ingredientes de la despensa.`);
     closeModal();
     refresh();
@@ -327,14 +240,14 @@ async function recipeForm(recipe = null) {
       <label class="field">Nombre<input name="name" required value="${esc(r.name)}" placeholder="Ej: Sancocho de la abuela"></label>
       <div class="form-grid">
         <label class="field">Tipo de plato<select name="dish_type">${options(META.dish_types, r.dish_type)}</select></label>
-        <label class="field">Rinde (porciones)<input name="servings" type="number" min="1" required value="${r.servings}"></label>
+        <label class="field">Rinde (porciones de adulto)<input name="servings" type="number" min="1" required value="${r.servings}"></label>
         <label class="field">Tiempo (min)<input name="prep_minutes" type="number" min="0" value="${r.prep_minutes ?? ""}"></label>
       </div>
       <div class="row">Se come en: ${META.meal_types.map((m) => `
         <label class="row"><input type="checkbox" name="meal" value="${m}" ${r.meal_types.includes(m) ? "checked" : ""}> ${cap(m)}</label>`).join("")}
         <label class="row" style="margin-left:auto"><input type="checkbox" name="favorite" ${r.favorite ? "checked" : ""}> Favorita</label>
       </div>
-      <h3>Ingredientes <span class="muted small">(las cantidades exactas para ${r.servings} porciones como la hacen en casa)</span></h3>
+      <h3>Ingredientes <span class="muted small">(las cantidades exactas para ${r.servings} porciones de adulto como la hacen en casa; un niño cuenta como ${fmtQty(META.kid_portion)})</span></h3>
       <div id="ing-rows" class="stack"></div>
       <div><button type="button" id="add-ing">${icon("plus", 18)} Ingrediente</button></div>
       <label class="field">Preparación (un paso por línea)<textarea name="instructions">${esc(r.instructions)}</textarea></label>
@@ -465,7 +378,7 @@ async function renderPantry() {
       <tbody>${items.map((i, idx) => `
         ${idx === 0 || items[idx - 1].category !== i.category ? `<tr class="cat"><th colspan="6">${esc(cap(i.category))}</th></tr>` : ""}
         <tr class="${i.expiring ? "expiring" : ""}" data-id="${i.id}">
-          <td>${esc(i.name)} ${i.quantity <= 0 ? `<span class="badge bad">agotado</span>` : i.low ? `<span class="badge warn">poco</span>` : ""}</td>
+          <td>${esc(i.name)} ${i.unit === "porcion" && i.quantity > 0 ? `<span class="muted small">${esc(fmtAmount(i.quantity, i.unit))}</span>` : ""} ${i.quantity <= 0 ? `<span class="badge bad">agotado</span>` : i.low ? `<span class="badge warn">poco</span>` : ""}</td>
           <td><input type="number" step="any" min="0" value="${i.quantity}" data-f="quantity"></td>
           <td><input list="dl-units" value="${esc(i.unit)}" data-f="unit"></td>
           <td><input type="date" value="${i.expires_on ?? ""}" data-f="expires_on"></td>
@@ -480,9 +393,8 @@ async function renderPantry() {
       title: "Agregar a la despensa",
       body: `<form id="pf" class="stack">
         <label class="field">Ingrediente<input name="name" required autocomplete="off" placeholder="Ej: Leche"></label>
+        <div class="field">¿Cuánto hay?${amountForm(null, null, { withUnit: true, preferPortions: mode === "tranquilo" })}</div>
         <div class="form-grid">
-          <label class="field">Cantidad<input name="quantity" type="number" step="any" min="0" required></label>
-          <label class="field">Unidad<input name="unit" list="dl-units" value="unidad"></label>
           <label class="field">Categoría<select name="category">${options(META.categories, "", "Sin categoría")}</select></label>
           <label class="field">Vence<input name="expires_on" type="date"></label>
           <label class="field">Mínimo (opcional)<input name="min_quantity" type="number" step="any" min="0" placeholder="Avisar si baja de…"></label>
@@ -494,7 +406,7 @@ async function renderPantry() {
           if (!f.reportValidity()) return false;
           return safe(async () => {
             await api("/api/pantry", { method: "POST", json: {
-              name: f.name.value, quantity: parseFloat(f.quantity.value), unit: f.unit.value || "unidad",
+              name: f.name.value, ...readAmountForm(dlg, null),
               category: f.category.value || null, expires_on: f.expires_on.value || null,
               min_quantity: f.min_quantity.value === "" ? null : parseFloat(f.min_quantity.value),
             } });
@@ -504,6 +416,7 @@ async function renderPantry() {
         } },
       ],
     });
+    bindAmountForm(m.el, null);
     m.done.then((ok) => ok && renderPantry());
   };
   $("#scan").onclick = scanDialog;
@@ -702,55 +615,6 @@ async function renderShopping() {
 
 // ---------------------------------------------------------------- horario de una tarea
 
-const DAY_SHORT = ["L", "M", "X", "J", "V", "S", "D"];
-const DAY_NAMES = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
-const EVERY_OPTS = [[1, "Todos los días"], [2, "Cada 2 días"], [3, "Cada 3 días"], [7, "Cada semana"], [14, "Cada 15 días"], [30, "Cada mes"]];
-
-function scheduleOf(c) {
-  return {
-    schedule: c.schedule ?? "every", every_days: c.every_days ?? 7, weekdays: c.weekdays ?? [],
-    month_day: c.month_day ?? null, remind_at: c.remind_at ?? null,
-  };
-}
-
-function scheduleFields(c) {
-  const s = scheduleOf(c);
-  const kinds = [["weekdays", "Días de la semana"], ["every", "Cada ciertos días"], ["monthday", "Un día del mes"]];
-  const everyOpts = EVERY_OPTS.some(([v]) => v === s.every_days) ? EVERY_OPTS : [...EVERY_OPTS, [s.every_days, `Cada ${s.every_days} días`]];
-  return `
-    <div class="field">¿Cuándo toca?
-      <div class="seg">${kinds.map(([k, t]) => `<label><input type="radio" name="schedule" value="${k}" ${k === s.schedule ? "checked" : ""}><span>${t}</span></label>`).join("")}</div>
-    </div>
-    <div data-sch="weekdays" class="field">¿Qué días?
-      <div class="days">${DAY_SHORT.map((d, i) => `<label title="${DAY_NAMES[i]}"><input type="checkbox" name="wd" value="${i}" ${s.weekdays.includes(i) ? "checked" : ""}><span>${d}</span></label>`).join("")}</div>
-    </div>
-    <label data-sch="every" class="field">¿Cada cuánto?<select name="every_days">
-      ${everyOpts.map(([v, t]) => `<option value="${v}" ${v === s.every_days ? "selected" : ""}>${t}</option>`).join("")}</select></label>
-    <label data-sch="monthday" class="field">¿Qué día del mes?<input name="month_day" type="number" min="1" max="31" value="${s.month_day ?? ""}" placeholder="Ej: 1, 15, 30"></label>
-    <label class="field">Recordar en voz alta a las
-      <input name="remind_at" type="time" value="${s.remind_at ?? ""}">
-      <small class="muted">La tablet lo dice en voz alta ese día a esa hora, si nadie la ha hecho. Vacío = sin recordatorio.</small></label>`;
-}
-
-function bindSchedule(form) {
-  const sync = () => {
-    const kind = form.querySelector("[name=schedule]:checked")?.value ?? "every";
-    $$("[data-sch]", form).forEach((el) => { el.hidden = el.dataset.sch !== kind; });
-  };
-  $$("[name=schedule]", form).forEach((r) => r.onchange = sync);
-  sync();
-}
-
-function readSchedule(form) {
-  return {
-    schedule: form.querySelector("[name=schedule]:checked")?.value ?? "every",
-    every_days: +form.every_days.value || 7,
-    weekdays: $$("[name=wd]:checked", form).map((i) => +i.value),
-    month_day: form.month_day.value ? +form.month_day.value : null,
-    remind_at: form.remind_at.value || null,
-  };
-}
-
 // ---------------------------------------------------------------- modelos de IA
 
 function aiRow(role, label, hint) {
@@ -815,7 +679,11 @@ async function renderHouse() {
         <div class="row spread" style="border-top:1px dashed var(--line);padding-top:.75rem">
           <span>Palabra de activación: <b>«${esc(META.wake_word)}»</b></span>
           <button id="wake-word">${icon("mic", 18)} Cambiar</button></div>
-        <p class="muted small" style="margin:0">Se dice antes de un comando de voz, por ejemplo «${esc(META.wake_word)}, se acabó la leche». Se activa en cada tablet con el botón que está junto a la hora.</p>
+        <p class="muted small" style="margin:0">Se dice antes de un comando de voz, por ejemplo «${esc(META.wake_word)}, se acabó la leche».</p>
+        ${VOICE_SUPPORTED ? `<label class="row spread"><span>Escuchar «${esc(META.wake_word)}» en este aparato</span>
+          <input type="checkbox" id="wake-on" style="width:1.4rem;height:1.4rem"></label>
+        <p class="muted small" style="margin:0">Se activa en cada tablet por separado: háganlo desde la tablet de la nevera.
+          Mientras está activo, la pantalla de la casa escucha sin tener que tocarla.</p>` : ""}
       </section>
       <section class="card stack" id="voice-card">
         <h2>Voz de esta tablet</h2>
@@ -904,6 +772,14 @@ async function renderHouse() {
   $("#v-rate").onchange = (e) => { setVoicePrefs({ rate: +e.target.value }); speak("Hola, así de rápido hablo.", { force: true }); };
   $("#v-test").onclick = () => speak(`Hola, soy ${META.house_name}. Hoy hay arroz con pollo de almuerzo.`, { force: true });
   bindAI();
+  const wakeBox = $("#wake-on");
+  if (wakeBox) {
+    try { wakeBox.checked = localStorage.getItem(WAKE_KEY) === "1"; } catch { /* sin almacenamiento */ }
+    wakeBox.onchange = () => {
+      try { localStorage.setItem(WAKE_KEY, wakeBox.checked ? "1" : "0"); } catch { /* sin almacenamiento */ }
+      toast(wakeBox.checked ? `Listo: al volver a la pantalla de la casa, digan «${META.wake_word}»` : `«${META.wake_word}» apagado en este aparato`, 4000);
+    };
+  }
   $("#wake-word").onclick = () => {
     formModal({
       title: "Palabra de activación", size: "narrow",
@@ -1009,10 +885,14 @@ async function renderHouse() {
 (async () => {
   await safe(async () => {
     META = await api("/api/meta");
+    setHouse(META);
     $("#household").value = META.household_size;
+    $("#household-kids").value = META.household_kids;
+    $("#kid-portion").value = String(META.kid_portion);
+    if (!$("#kid-portion").value) $("#kid-portion").value = "0.5";
     $("#house-title").textContent = META.house_name;
     $("#home-link").innerHTML = `${icon("home", 20)} Casa`;
     document.title = `${META.house_name} · Administrar`;
-    go("menu");
+    go("recipes");
   });
 })();

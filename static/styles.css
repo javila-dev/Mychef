@@ -188,17 +188,6 @@ tr.cat th { font-weight: 600; font-size: .95rem; text-transform: none; letter-sp
 
 main { padding: 1.2rem; max-width: 1120px; margin: 0 auto; }
 
-.week { display: grid; gap: .9rem; grid-template-columns: repeat(auto-fill, minmax(235px, 1fr)); }
-.day.today { border-color: var(--green); box-shadow: inset 0 0 0 1px var(--green); }
-.day h3 { margin: 0 0 .5rem; }
-.slot { border-top: 1px dashed var(--line); padding: .45rem 0; }
-.slot-title { font-size: .74rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
-.entry { display: flex; align-items: center; gap: .3rem; margin: .25rem 0; }
-.entry a { flex: 1; cursor: pointer; color: var(--ink); text-decoration: none; }
-.entry a:hover { color: var(--green-ink); text-decoration: underline; }
-.entry.cooked a { text-decoration: line-through; color: var(--muted); }
-.entry button { padding: .2rem .35rem; }
-
 .ing-row { display: grid; gap: .4rem; grid-template-columns: 2fr .8fr .9fr 1.3fr auto auto; align-items: center; }
 .form-grid { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
 
@@ -317,3 +306,36 @@ dialog::backdrop { background: rgba(22, 32, 24, .45); animation: fade-in .22s va
 .ai-row + .ai-row { border-top: 1px dashed var(--line); padding-top: .8rem; }
 .ok-text { color: var(--green-ink); font-weight: 500; }
 .bad-text { color: var(--berry); font-weight: 500; }
+
+/* ¿Cuánto hay? Por porciones (adultos y niños) o por medida. Lo usan la tablet y Administrar. */
+.amount-form { display: grid; gap: .9rem; margin-top: .4rem; }
+.amt-mode { display: flex; gap: .35rem; padding: .3rem; border-radius: 999px; background: var(--paper-2); }
+.amt-mode button {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: .45rem; min-height: 48px;
+  border: 0 !important; background: transparent !important; color: var(--muted) !important; font-weight: 500; border-radius: 999px;
+}
+.amt-mode button[aria-checked="true"] { background: var(--green) !important; color: var(--on-green) !important; }
+.amount-form[data-mode="portions"] .amt-measure, .amount-form[data-mode="measure"] .amt-portions { display: none; }
+.amt-portions .m-text { margin: 0 0 .5rem; }
+
+.people-picker { display: grid; gap: .5rem; }
+.pp-row { display: flex; align-items: center; gap: .8rem; }
+.pp-label { flex: 1; font-size: 1.1rem; font-weight: 500; }
+.pp-row button { width: 52px; height: 52px; padding: 0 !important; flex: none; border-radius: 50%; background: var(--paper-2) !important; border-color: transparent !important; }
+.pp-row strong { min-width: 2.2rem; text-align: center; font-size: 1.6rem; font-weight: 500; font-variant-numeric: tabular-nums; }
+
+.inv-qty { display: flex; align-items: center; justify-content: center; gap: 1rem; }
+.inv-qty > button { width: 64px; height: 64px; padding: 0 !important; flex: none; border-radius: 50%; background: var(--paper-2) !important; border-color: transparent !important; }
+.inv-qty label { display: flex; flex-direction: column; align-items: center; gap: .3rem; min-width: 0; }
+.inv-qty input { width: 7.5rem; max-width: 100%; text-align: center; font-size: 2rem !important; font-weight: 500; font-variant-numeric: tabular-nums; padding: .5rem !important; }
+.inv-qty .qu-txt { font-size: 1.1rem; color: var(--muted); }
+.inv-qty select { width: auto; }
+@media (max-width: 760px) {
+  .inv-qty { gap: .6rem; }
+  .inv-qty > button { width: 56px; height: 56px; }
+  .inv-qty input { width: 6rem; }
+}
+
+/* Cabecera de Administrar: quiénes comen en casa */
+.household label { display: inline-flex; align-items: center; gap: .35rem; }
+.household select { width: auto; padding: .3rem .5rem; }

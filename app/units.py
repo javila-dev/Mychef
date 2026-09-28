@@ -39,7 +39,10 @@ ALIASES: dict[str, str] = {
     "u": "unidad", "un": "unidad", "und": "unidad", "unidades": "unidad",
     "pieza": "unidad", "piezas": "unidad",
     "docenas": "docena",
+    # Inventario por porciones: la cantidad se cuenta en porciones de adulto
+    "porcion": "porcion", "porciones": "porcion",
 }
+PORTION = "porcion"
 
 
 def strip_accents(text: str) -> str:

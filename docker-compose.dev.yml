@@ -1,0 +1,63 @@
+# Entorno de pruebas local con PostgreSQL y MinIO, como en producción.
+# Se usa encima del docker-compose.yml normal:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#
+# Usa puertos distintos a los de siempre para no chocar con otros proyectos (cámbienlos en .env):
+# App:            http://localhost:8001
+# Consola MinIO:  http://localhost:9003  (usuario y clave: MYCHEF_S3_ACCESS_KEY / MYCHEF_S3_SECRET_KEY)
+# PostgreSQL:     localhost:5433  (mychef / mychef, base mychef)
+
+services:
+  mychef:
+    ports: !override
+      - "${MYCHEF_DEV_PORT:-8001}:8000"
+    environment:
+      - MYCHEF_DATABASE_URL=postgresql://mychef:mychef@postgres:5432/mychef
+      - MYCHEF_S3_ENDPOINT=http://minio:9000
+      - MYCHEF_S3_ACCESS_KEY=${MYCHEF_S3_ACCESS_KEY:-mychef}
+      - MYCHEF_S3_SECRET_KEY=${MYCHEF_S3_SECRET_KEY:-mychef-secret}
+      - MYCHEF_S3_BUCKET=${MYCHEF_S3_BUCKET:-mychef}   # la app lo crea sola si no existe
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: "no"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=mychef
+      - POSTGRES_PASSWORD=mychef
+      - POSTGRES_DB=mychef
+    ports:
+      - "${MYCHEF_DEV_PG_PORT:-5433}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mychef -d mychef"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${MYCHEF_S3_ACCESS_KEY:-mychef}
+      - MINIO_ROOT_PASSWORD=${MYCHEF_S3_SECRET_KEY:-mychef-secret}
+    ports:
+      - "${MYCHEF_DEV_MINIO_PORT:-9002}:9000"
+      - "${MYCHEF_DEV_MINIO_CONSOLE_PORT:-9003}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  postgres-data:
+  minio-data:

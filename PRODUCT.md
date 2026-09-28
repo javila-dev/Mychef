@@ -23,12 +23,12 @@ No trae recetas genéricas: todo sale de las recetas, el inventario y las rutina
 - Una tablet pegada a la nevera, en la cocina, prendida todo el día: se lee de pie, a un metro o más, con luz de día y de noche.
 - También se abre desde el celular (por ejemplo en el supermercado para la lista).
 - La pantalla de la tablet vuelve sola al inicio después de 2 minutos sin uso.
-- Rituales: cocinar el almuerzo y la cena, hacer mercado y guardar la factura, marcar tareas (basura, loza, plantas…).
+- Rituales: cocinar el almuerzo y la cena, hacer mercado y guardar la factura, marcar tareas (basura, loza, plantas…), y el sábado o domingo revisar la nevera y la alacena.
 
 ## Capabilities and Constraints
 
-- Pantalla de la casa (`/`): menú de hoy, tareas del día, vencimientos, escanear factura, lista de compras, ¿qué cocino?, "se acabó algo", modo cocina.
-- Administrar (`/admin`): recetas, menú semanal, despensa, compras, personas, tareas y gastos.
+- Pantalla de la casa (`/`): menú de hoy, tareas del día, vencimientos, escanear factura, lista de compras, ¿qué cocino?, "se acabó algo", ¿qué hay? (revisar la casa por grupos), menú de la semana, tareas, modo cocina.
+- Administrar (`/admin`): recetas, despensa, compras, personas, tareas y gastos. El menú semanal y las tareas del día a día se manejan desde la pantalla de la casa.
 - Servidor FastAPI + SQLite en un equipo de la casa; interfaz HTML/CSS/JS sin framework ni paso de compilación. Debe funcionar sin internet salvo la lectura de facturas con IA.
 - Idioma: español (Colombia), tratamiento de "ustedes".
 

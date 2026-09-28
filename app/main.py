@@ -17,7 +17,7 @@ import segno
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from . import agenda, ai, clock, household, services, storage, vision, voice
+from . import agenda, ai, clock, household, inventory, services, storage, vision, voice
 from .auth import AuthMiddleware, check_pin, pin_enabled
 from . import db
 from .db import get_session, init_db
@@ -97,6 +97,17 @@ class PantryUpdate(BaseModel):
     min_quantity: float | None = Field(None, ge=0)
 
 
+class ReviewLine(BaseModel):
+    id: int
+    state: Literal["ok", "low", "out"]
+    quantity: float | None = Field(None, ge=0)
+    unit: str | None = Field(None, max_length=20)  # "porcion" para contar en porciones
+
+
+class ReviewIn(BaseModel):
+    items: list[ReviewLine] = Field(default_factory=list)
+
+
 class MemberIn(BaseModel):
     name: str = Field(min_length=1, max_length=40)
     emoji: str = Field("🙂", max_length=8)
@@ -160,28 +171,33 @@ class PinIn(BaseModel):
     pin: str
 
 
+# servings = adultos; kids = niños (comen menos, según «Un niño come…» de la casa)
 class MenuIn(BaseModel):
     day: dt.date
     meal_type: str
     recipe_id: int
-    servings: int | None = Field(None, ge=1)
+    servings: int | None = Field(None, ge=0)
+    kids: int | None = Field(None, ge=0)
 
 
 class MenuUpdate(BaseModel):
     recipe_id: int | None = None
-    servings: int | None = Field(None, ge=1)
+    servings: int | None = Field(None, ge=0)
+    kids: int | None = Field(None, ge=0)
 
 
 class AutoplanIn(BaseModel):
     start: dt.date
     days: int = Field(7, ge=1, le=31)
     meal_types: list[str] = Field(default_factory=lambda: ["almuerzo", "cena"])
-    servings: int | None = Field(None, ge=1)
+    servings: int | None = Field(None, ge=0)
+    kids: int | None = Field(None, ge=0)
     overwrite: bool = False
 
 
 class CookIn(BaseModel):
-    servings: int | None = Field(None, ge=1)
+    servings: int | None = Field(None, ge=0)
+    kids: int | None = Field(None, ge=0)
 
 
 class IngredientUpdate(BaseModel):
@@ -192,7 +208,9 @@ class IngredientUpdate(BaseModel):
 
 
 class SettingsIn(BaseModel):
-    household_size: int | None = Field(None, ge=1, le=50)
+    household_size: int | None = Field(None, ge=1, le=50)  # adultos
+    household_kids: int | None = Field(None, ge=0, le=20)
+    kid_portion: float | None = Field(None, ge=0.1, le=1)
     house_name: str | None = Field(None, max_length=60)
     wake_word: str | None = Field(None, max_length=40)
     inventory_mode: str | None = None
@@ -240,12 +258,30 @@ def _menu_out(e: MenuEntry) -> dict:
         "day": e.day.isoformat(),
         "meal_type": e.meal_type,
         "servings": e.servings,
+        "kids": e.kids or 0,
         "cooked": e.cooked,
         "recipe": services.recipe_summary(e.recipe),
     }
 
 
 # ---------------------------------------------------------------- catálogos
+
+def _household(session: Session) -> dict:
+    return {
+        "household_size": services.household_size(session),  # adultos
+        "household_kids": services.household_kids(session),
+        "kid_portion": services.kid_portion(session),
+    }
+
+
+def _servings(session: Session, adults: int | None, kids: int | None) -> tuple[int, int]:
+    """Adultos y niños para una comida; sin datos, los de la casa."""
+    if adults is None:
+        return services.household_size(session), services.household_kids(session) if kids is None else kids
+    if adults + (kids or 0) < 1:
+        raise HTTPException(422, "Tiene que comer al menos una persona.")
+    return adults, kids or 0
+
 
 @app.get("/api/meta")
 def meta(session: Session = SessionDep):
@@ -254,7 +290,7 @@ def meta(session: Session = SessionDep):
         "dish_types": DISH_TYPES,
         "categories": INGREDIENT_CATEGORIES,
         "units": list(UNITS),
-        "household_size": services.household_size(session),
+        **_household(session),
         "house_name": _house_name(session),
         "wake_word": _wake_word(session),
         "inventory_mode": services.inventory_mode(session),
@@ -277,6 +313,10 @@ def login(data: PinIn, request: Request):
 def update_settings(data: SettingsIn, session: Session = SessionDep):
     if data.household_size is not None:
         session.merge(Setting(key="household_size", value=str(data.household_size)))
+    if data.household_kids is not None:
+        session.merge(Setting(key="household_kids", value=str(data.household_kids)))
+    if data.kid_portion is not None:
+        session.merge(Setting(key="kid_portion", value=str(round(data.kid_portion, 3))))
     if data.house_name is not None:
         session.merge(Setting(key="house_name", value=data.house_name.strip()))
     if data.wake_word is not None:
@@ -297,7 +337,7 @@ def update_settings(data: SettingsIn, session: Session = SessionDep):
         session.merge(Setting(key="inventory_mode", value=data.inventory_mode))
     session.commit()
     return {
-        "household_size": services.household_size(session),
+        **_household(session),
         "house_name": _house_name(session),
         "wake_word": _wake_word(session),
         "inventory_mode": services.inventory_mode(session),
@@ -404,7 +444,7 @@ def list_recipes(
     session: Session = SessionDep,
 ):
     pantry = services.load_pantry(session)
-    size = services.household_size(session)
+    size = services.portions(session)
     out = []
     for r in session.exec(select(Recipe).order_by(Recipe.name)):
         if meal_type and meal_type not in r.meal_type_list:
@@ -435,9 +475,18 @@ def create_recipe(data: RecipeIn, session: Session = SessionDep):
 
 
 @app.get("/api/recipes/{recipe_id}")
-def get_recipe(recipe_id: int, servings: int | None = None, session: Session = SessionDep):
+def get_recipe(recipe_id: int, servings: int | None = None, kids: int | None = None,
+               session: Session = SessionDep):
+    """servings = adultos y kids = niños; sin servings, la receta tal como está escrita."""
     recipe = _get_recipe(session, recipe_id)
-    return services.recipe_detail(recipe, servings, services.load_pantry(session))
+    eaten = None
+    if servings is not None:
+        servings, kids = _servings(session, servings, kids)
+        eaten = services.portions(session, servings, kids)
+    data = services.recipe_detail(recipe, eaten, services.load_pantry(session))
+    data["adults"] = servings if servings is not None else recipe.servings
+    data["kids"] = kids or 0
+    return data
 
 
 @app.put("/api/recipes/{recipe_id}")
@@ -464,8 +513,8 @@ def delete_recipe(recipe_id: int, session: Session = SessionDep):
 @app.post("/api/recipes/{recipe_id}/cook")
 def cook_recipe(recipe_id: int, data: CookIn, session: Session = SessionDep):
     recipe = _get_recipe(session, recipe_id)
-    servings = data.servings or services.household_size(session)
-    changes = services.cook(session, recipe, servings)
+    adults, kids = _servings(session, data.servings, data.kids)
+    changes = services.cook(session, recipe, adults, kids=kids)
     session.commit()
     return {"pantry_changes": changes}
 
@@ -518,6 +567,21 @@ def delete_pantry(item_id: int, session: Session = SessionDep):
     if item:
         session.delete(item)
         session.commit()
+
+
+@app.get("/api/inventory")
+def get_inventory(session: Session = SessionDep):
+    """Lo que hay en la casa por grupos (proteínas, lácteos…), para revisarlo el fin de semana."""
+    return inventory.overview(session, _pantry_out)
+
+
+@app.post("/api/inventory/{group}/review")
+def review_inventory(group: str, data: ReviewIn, session: Session = SessionDep):
+    if group not in inventory.GROUP_KEYS:
+        raise HTTPException(404, "Ese grupo no existe")
+    result = inventory.save_group(session, group, data.items)
+    session.commit()
+    return result
 
 
 # Qué se suele guardar en cada lugar, para preguntar por lo que no salió en la foto.
@@ -606,9 +670,11 @@ def suggestions(
     dish_type: str | None = None,
     servings: int | None = None,
     limit: int = 10,
+    kids: int | None = None,
     session: Session = SessionDep,
 ):
-    return services.suggest(session, meal_type, servings, dish_type, limit=limit)
+    adults, kids = _servings(session, servings, kids)
+    return services.suggest(session, meal_type, services.portions(session, adults, kids), dish_type, limit=limit)
 
 
 # ---------------------------------------------------------------- menú
@@ -620,17 +686,26 @@ def get_menu(start: dt.date, days: int = 7, session: Session = SessionDep):
         select(MenuEntry).where(MenuEntry.day >= start, MenuEntry.day <= end)
         .order_by(MenuEntry.day)
     ).all()
-    return [_menu_out(e) for e in entries]
+    # Cada plato dice si hoy hay todo lo que pide (para los adultos y niños de esa comida).
+    pantry = services.load_pantry(session)
+    out = []
+    for e in entries:
+        avail = services.check_availability(e.recipe, services.entry_portions(session, e), pantry)
+        out.append({
+            **_menu_out(e),
+            "can_cook": avail["can_cook"],
+            "missing": [i["name"] for i in avail["items"] if i["status"] in ("falta", "poco") and not i["optional"]],
+        })
+    return out
 
 
 @app.post("/api/menu", status_code=201)
 def add_menu(data: MenuIn, session: Session = SessionDep):
     _validate_meals([data.meal_type])
     _get_recipe(session, data.recipe_id)
-    entry = MenuEntry(
-        day=data.day, meal_type=data.meal_type, recipe_id=data.recipe_id,
-        servings=data.servings or services.household_size(session),
-    )
+    adults, kids = _servings(session, data.servings, data.kids)
+    entry = MenuEntry(day=data.day, meal_type=data.meal_type, recipe_id=data.recipe_id,
+                      servings=adults, kids=kids)
     session.add(entry)
     session.commit()
     session.refresh(entry)
@@ -647,6 +722,10 @@ def update_menu(entry_id: int, data: MenuUpdate, session: Session = SessionDep):
         entry.recipe_id = data.recipe_id
     if data.servings is not None:
         entry.servings = data.servings
+    if data.kids is not None:
+        entry.kids = data.kids
+    if entry.servings + (entry.kids or 0) < 1:
+        raise HTTPException(422, "Tiene que comer al menos una persona.")
     session.commit()
     session.refresh(entry)
     return _menu_out(entry)
@@ -664,7 +743,7 @@ def delete_menu(entry_id: int, session: Session = SessionDep):
 def menu_autoplan(data: AutoplanIn, session: Session = SessionDep):
     created = services.autoplan(
         session, data.start, data.days, _validate_meals(data.meal_types),
-        data.servings, data.overwrite,
+        data.servings, data.overwrite, kids=data.kids,
     )
     session.commit()
     for e in created:
@@ -679,7 +758,7 @@ def cook_menu(entry_id: int, session: Session = SessionDep):
         raise HTTPException(404, "No está en el menú")
     if entry.cooked:
         raise HTTPException(409, "Ya se marcó como cocinado")
-    changes = services.cook(session, entry.recipe, entry.servings, entry.day)
+    changes = services.cook(session, entry.recipe, entry.servings, entry.day, kids=entry.kids or 0)
     entry.cooked = True
     session.commit()
     return {"pantry_changes": changes}
@@ -920,6 +999,7 @@ def voice_command(data: VoiceIn, session: Session = SessionDep):
 def today(session: Session = SessionDep):
     data = household.today_summary(session)
     data["agenda"] = agenda.upcoming(session, 7)[:4]
+    data["inventory"] = inventory.last_review(session)
     return data
 
 
@@ -1128,19 +1208,41 @@ def chore_undo(chore_id: int, session: Session = SessionDep):
 
 # ---------------------------------------------------------------- interfaz
 
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+# La tablet queda prendida días enteros y nadie la recarga a mano. Si el navegador guarda una copia
+# vieja del CSS o del JS, después de actualizar la app se mezclan versiones y una pantalla puede salir
+# sin estilos. Por eso el HTML, el CSS y el JS se revalidan siempre (no-cache + ETag: si no cambiaron,
+# el servidor responde 304 sin volver a enviarlos); las letras y las imágenes sí se guardan tiempo largo.
+REVALIDATE = "no-cache"
+CACHE_BY_EXT = {
+    ".html": REVALIDATE, ".css": REVALIDATE, ".js": REVALIDATE, ".webmanifest": REVALIDATE,
+    ".woff2": "public, max-age=31536000, immutable",
+    ".svg": "public, max-age=86400", ".png": "public, max-age=86400", ".jpg": "public, max-age=86400",
+}
+
+
+class CasaStaticFiles(StaticFiles):
+    def file_response(self, full_path, *args, **kwargs):
+        response = super().file_response(full_path, *args, **kwargs)
+        cache = CACHE_BY_EXT.get(Path(full_path).suffix.lower())
+        if cache:
+            response.headers["Cache-Control"] = cache
+        return response
+
+
+app.mount("/static", CasaStaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.get("/", include_in_schema=False)
 def index():
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": REVALIDATE})
 
 
 @app.get("/admin", include_in_schema=False)
 def admin():
-    return FileResponse(STATIC_DIR / "admin.html")
+    return FileResponse(STATIC_DIR / "admin.html", headers={"Cache-Control": REVALIDATE})
 
 
 @app.get("/manifest.webmanifest", include_in_schema=False)
 def manifest():
-    return FileResponse(STATIC_DIR / "manifest.webmanifest", media_type="application/manifest+json")
+    return FileResponse(STATIC_DIR / "manifest.webmanifest", media_type="application/manifest+json",
+                        headers={"Cache-Control": REVALIDATE})

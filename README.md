@@ -153,6 +153,21 @@ python -m app.storage     # una vez: sube a MinIO las fotos que ya estaban en da
 Las fotos siempre pasan por la app (`/api/photos/{id}/file`), así el bucket no necesita ser público y el
 PIN de la casa las sigue protegiendo. Con PostgreSQL + MinIO, el contenedor de la app no guarda nada en disco.
 
+### Probar en local con PostgreSQL y MinIO
+
+`docker-compose.dev.yml` levanta la app junto con un PostgreSQL y un MinIO propios, ya conectados:
+
+```bash
+cp .env.example .env      # opcional: claves de IA, PIN, usuario de MinIO
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+```
+
+App en http://localhost:8001, consola de MinIO en http://localhost:9003 (usuario `mychef`, clave
+`mychef-secret` salvo que las cambien en `.env`) y PostgreSQL en `localhost:5433` (`mychef` / `mychef`).
+Los puertos son distintos a los de siempre para no chocar con otros proyectos; se cambian en `.env`.
+Los datos quedan en volúmenes de Docker; `docker compose -f docker-compose.yml -f docker-compose.dev.yml down -v`
+los borra y empiezan de cero.
+
 **Zona horaria**: la app usa la hora de Colombia (`America/Bogota`) para saber qué día es, aunque el
 computador o el servidor estén en otra hora. Para cambiarla: `MYCHEF_TZ=America/Mexico_City` (o la que sea).
 
