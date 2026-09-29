@@ -250,9 +250,14 @@ Toquen **Hablar** (junto a la hora o arriba en cada pantalla) y digan, por ejemp
 |---|---|
 | Anotar lo que se acabó | «se acabó la leche y los huevos» |
 | Agregar a la lista | «agrega pan y jabón a la lista», «necesitamos arepas» |
+| Quitar de la lista | «quita el pan de la lista», «ya compré el queso» |
 | Marcar una tarea | «ya saqué la basura», «Sofi ya regó las plantas» |
-| Saber qué hay | «¿qué hay de almuerzo?», «¿qué falta comprar?», «¿qué se vence?», «¿qué tareas hay?» |
+| Saber qué hay | «¿qué hay de almuerzo?», «¿qué comemos mañana?», «¿qué hay de cena el jueves?», «¿hay leche?», «¿cuánto arroz queda?», «¿qué falta comprar?», «¿qué se vence?», «¿qué tareas hay?» |
+| Poner en el menú | «pon lentejas el jueves de almuerzo», «mañana almorzamos arroz con pollo con sobras de frijoles» |
+| Sobras | «guardé frijoles en el congelador, 6 porciones», «sobró pizza», «hoy cenamos sobras de bolognesa», «ya nos comimos los frijoles», «se botaron las sobras de arroz», «¿qué sobras hay?» |
 | Decidir qué cocinar | «¿qué cocino?», «abre la receta de lentejas» |
+| Estrellas de los niños | «¿cuántas estrellas tiene Benja?», «abre los logros» |
+| Ir a una pantalla | «menú de la semana», «armar el menú», «abre el inventario», «muéstrame las sobras», «lista de compras», «tareas», «fotos» |
 | Temporizadores | «pon un temporizador de diez minutos para el arroz», «¿cuánto falta?», «cancela el temporizador» |
 | Agenda | «recuérdame la cita de Benja el jueves a las 3», «¿qué hay en la agenda?», «¿qué tenemos mañana?» |
 | Corregir | «deshacer» (o el botón **Deshacer** que aparece) |

@@ -3311,6 +3311,10 @@ async function runUndo() {
 let voicePending = null;
 let voicePendingAt = 0;
 
+// Comandos de voz que cambian lo que se ve en pantalla
+const VOICE_CHANGES = ["ran_out", "list_add", "list_remove", "chore_done", "agenda_add", "menu_add",
+  "leftover_add", "leftover_eat", "leftover_done"];
+
 async function handleVoiceText(text, { box = null, handsFree: hf = false } = {}) {
   const context = { screen, handsfree: hf, ...(COOK ? { recipe_id: COOK.recipeId, servings: COOK.servings, kids: COOK.kids } : {}) };
   if (voicePending && Date.now() - voicePendingAt < 60 * 1000) context.pending = voicePending;
@@ -3348,11 +3352,14 @@ async function handleVoiceText(text, { box = null, handsFree: hf = false } = {})
     else if (nav.screen === "photos") photosModal();
     else if (nav.screen === "cook") go("cook", { recipeId: nav.recipeId });
     else if (nav.screen === "what") go("what", nav.meal ? { meal: nav.meal } : {});
+    else if (nav.screen === "sunday") go("sunday", { start: wizWeek() });
     else go(nav.screen);
-  } else if (screen === "home" && ["ran_out", "list_add", "chore_done", "agenda_add"].includes(res.intent)) {
+  } else if (screen === "home" && VOICE_CHANGES.includes(res.intent)) {
     safe(renderHome);
   } else if (screen === "agenda" && res.intent === "agenda_add") {
     go("agenda");
+  } else if (["menu", "leftovers", "shopping"].includes(screen) && VOICE_CHANGES.includes(res.intent)) {
+    go(screen); // lo que se ve cambió (el menú, las sobras, la lista)
   }
   await speaking;
   return res;

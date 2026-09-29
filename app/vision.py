@@ -189,19 +189,27 @@ class VoiceCanonical(BaseModel):
 
 
 def voice_canonical(
-    text: str, recipes: list[str], chores: list[str], screen: str, model: str | None = None
+    text: str, recipes: list[str], chores: list[str], screen: str, model: str | None = None,
+    leftovers: list[str] | None = None,
 ) -> str | None:
     """Reescribe una frase dicha en la cocina como uno de los comandos que la casa entiende."""
     prompt = f"""Alguien de la familia le habló a la pantalla de la cocina. El reconocimiento de voz \
 entendió: <frase>{text}</frase>
 Pantalla actual: {screen}. Recetas de la casa: {", ".join(recipes) or "(ninguna)"}. \
-Tareas de la casa: {", ".join(chores) or "(ninguna)"}.
+Tareas de la casa: {", ".join(chores) or "(ninguna)"}. Sobras guardadas: {", ".join(leftovers or []) or "(ninguna)"}.
 
 Reescribe la intención como UNO de estos comandos, en español, con los nombres reales de arriba:
 - "se acabó <productos separados por coma>"
 - "agrega <productos separados por coma> a la lista"
 - "ya hice <nombre exacto de la tarea>"
-- "qué hay de <desayuno|almuerzo|cena|comer>"
+- "quita <productos> de la lista" (ya lo compraron o ya no hace falta)
+- "hay <producto>" o "cuánto <producto> queda" (preguntar qué hay en la casa)
+- "qué hay de <desayuno|almuerzo|cena|comer>", con el día si lo dicen: "qué hay de almuerzo mañana"
+- "pon <nombre exacto de la receta> el <día> de <desayuno|almuerzo|merienda|cena>" (ponerlo en el menú)
+- "guardé sobras de <comida> en el <congelador|nevera>, <N> porciones" (quedó comida hecha)
+- "hoy <almorzamos|cenamos> sobras de <comida>" (comer lo que quedó guardado)
+- "nos comimos las sobras de <comida>", "se acabaron las sobras de <comida>", "qué sobras hay"
+- "cuántas estrellas tiene <niño>", "armar el menú", "menú de la semana", "inventario"
 - "qué cocino" o "qué hago de <comida>"
 - "abre la receta de <nombre exacto de la receta>"
 - "temporizador de <N> minutos para <qué>"
