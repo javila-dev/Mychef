@@ -18,7 +18,7 @@ import segno
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from . import agenda, ai, clock, gcal, household, inventory, ideas, planner, prize_icons, rewards, services, storage, taste, vision, voice
+from . import agenda, ai, catalog, clock, gcal, household, inventory, ideas, planner, prize_icons, rewards, services, storage, taste, vision, voice
 from . import auth
 from .auth import AuthMiddleware, pin_enabled
 from . import db
@@ -50,6 +50,8 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    with Session(db.engine) as session:
+        catalog.seed(session)  # los básicos de la despensa, también en producción
     yield
 
 
