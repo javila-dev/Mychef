@@ -33,6 +33,8 @@ services:
       minio:
         condition: service_healthy
     restart: "no"
+    # En local no existen las redes de Dokploy: se usa la red normal de este compose
+    networks: !reset null
 
   postgres:
     image: postgres:16-alpine

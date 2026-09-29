@@ -1,31 +1,46 @@
+# Producción (Dokploy). Los dominios y el HTTPS se configuran en Dokploy → Domains apuntando al
+# servicio «mychef», puerto 8000. Las variables van en Dokploy → Environment (ver .env.example).
+#
+# No publica puertos: Traefik le llega por la red de Dokploy. Para correrlo a mano en un computador
+# de la casa, agreguen   ports: ["8000:8000"]   al servicio.
+
 services:
   mychef:
     build: .
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     environment:
-      # Opcional: Gemini lee las fotos (facturas, nevera, recetas) y OpenAI el texto y la voz.
-      # Los modelos se eligen en Ajustes → Casa y tareas.
+      # IA: Gemini lee las fotos (facturas, nevera, recetas); OpenAI es opcional para el texto.
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      # Entrar con usuario y contraseña (obligatorio si la app queda publicada en internet)
-      - MYCHEF_USER=${MYCHEF_USER:-}
-      - MYCHEF_PASSWORD=${MYCHEF_PASSWORD:-}
-      # O, solo dentro de la red de la casa, un PIN
-      - MYCHEF_PIN=${MYCHEF_PIN:-}
-      - MYCHEF_SECRET=${MYCHEF_SECRET:-}
-      # Opcional: usar PostgreSQL en vez del archivo SQLite de ./data
-      # - MYCHEF_DATABASE_URL=postgresql://usuario:clave@servidor:5432/mychef
-      # Opcional: guardar las fotos de la familia en MinIO / S3 en vez de ./data/photos
-      # - MYCHEF_S3_ENDPOINT=https://minio.midominio.com
-      # - MYCHEF_S3_ACCESS_KEY=...
-      # - MYCHEF_S3_SECRET_KEY=...
-      # - MYCHEF_S3_BUCKET=mychef
-      # Opcional: agenda sincronizada con el calendario de Google. Basta con poner la clave de la
-      # cuenta de servicio en ./data/google.json (si no está, la agenda funciona sin Google).
+      # Entrar con usuario y contraseña: obligatorio, sin ellos no despliega (la app queda en internet)
+      - MYCHEF_USER=${MYCHEF_USER:?Falta MYCHEF_USER}
+      - MYCHEF_PASSWORD=${MYCHEF_PASSWORD:?Falta MYCHEF_PASSWORD}
+      - MYCHEF_SECRET=${MYCHEF_SECRET:?Falta MYCHEF_SECRET (cadena larga y aleatoria)}
+      # Opcional: PostgreSQL en vez del SQLite del volumen
+      - MYCHEF_DATABASE_URL=${MYCHEF_DATABASE_URL:-}
+      # Opcional: fotos de la familia en MinIO / S3 en vez del volumen
+      - MYCHEF_S3_ENDPOINT=${MYCHEF_S3_ENDPOINT:-}
+      - MYCHEF_S3_ACCESS_KEY=${MYCHEF_S3_ACCESS_KEY:-}
+      - MYCHEF_S3_SECRET_KEY=${MYCHEF_S3_SECRET_KEY:-}
+      - MYCHEF_S3_BUCKET=${MYCHEF_S3_BUCKET:-mychef}
+      # Opcional: agenda con Google Calendar (contenido del JSON de la cuenta de servicio, o ruta)
       - MYCHEF_GOOGLE_CREDENTIALS=${MYCHEF_GOOGLE_CREDENTIALS:-/data/google.json}
-      # Zona horaria de la casa (para saber qué día es y a qué hora recordar las tareas)
+      - MYCHEF_GOOGLE_CALENDAR_ID=${MYCHEF_GOOGLE_CALENDAR_ID:-}
+      # Zona horaria de la casa
       - MYCHEF_TZ=${MYCHEF_TZ:-America/Bogota}
     volumes:
-      - ./data:/data
+      - mychef-data:/data
+    networks:
+      - dokploy-network   # Traefik (las etiquetas las pone Dokploy al configurar el dominio)
+      - shared-services   # PostgreSQL central (central-postgres) y MinIO (minio)
     restart: unless-stopped
+
+volumes:
+  mychef-data:
+
+networks:
+  dokploy-network:
+    external: true
+  shared-services:
+    external: true
