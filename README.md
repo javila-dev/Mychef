@@ -37,6 +37,15 @@ pocas palabras, siempre un **← Volver**, y si nadie la toca por 2 minutos vuel
   hecho, la tablet suena y dice «Recordatorio: sacar la basura. Hoy le toca a Papá.». Se responde
   **Ya la hicimos**, **En 30 minutos** o **Hoy no**. Solo avisa la pantalla de la casa (no el celular), y si
   estuvo apagada no avisa más de 4 horas tarde.
+- **Armar el menú (el ritual del domingo)**: desde «Hoy en la mesa» (del viernes al domingo, para la semana
+  que viene) o desde el menú de la semana. Cuatro pasos: **¿Qué hay?** (revisar la nevera por grupos,
+  primero proteínas y harinas), **¿Cuándo comen en casa?** (la semana en cuadrícula; viene marcada como la
+  semana pasada), **El menú** y **Listo**. En «El menú», un deslizador de cinco posiciones va de
+  **Todo de la casa** a **Todo ideas nuevas** de la IA: las recetas de la casa no repiten lo de la semana
+  pasada y reparten las proteínas; las ideas nuevas giran alrededor de la proteína que hay, sin especias raras
+  y con lo que se consigue en la tienda. Tocando un plato se cambia por otra receta de la casa, se pide otra
+  idea o se elige la ensalada del almuerzo. Al guardar, lo que falta pasa a la lista de compras y las ideas
+  quedan como recetas de prueba. Lo elegido se guarda en la tablet: si vuelve sola al inicio, se sigue donde iba.
 - **Ojo con esto**: lo que se vence pronto y lo que se está acabando.
 - **📅 Agenda de la familia**: citas médicas, cosas del colegio (lo de Benja), cumpleaños, pagos y planes.
   Cada cosa tiene día, hora (opcional), para quién es y si se repite (cada semana, cada mes, cada año).

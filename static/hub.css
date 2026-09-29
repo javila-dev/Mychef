@@ -834,6 +834,133 @@ body.at-home #toast { top: 4.4rem; }
   .menu-bar { margin-top: 0; }
 }
 
+/* Armar el menú (asistente de cuatro pasos) */
+.wiz-steps { display: flex; flex-wrap: wrap; gap: .5rem; margin: -.6rem 0 1.3rem; }
+.wiz-step {
+  display: inline-flex; align-items: center; gap: .5rem; padding: .35rem 1rem .35rem .35rem !important;
+  border-radius: 999px !important; background: var(--paper) !important; border-color: transparent !important; color: var(--muted) !important; font-weight: 500;
+}
+.wiz-step:disabled { opacity: 1; cursor: default; }
+.wiz-step .n { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--paper-2); font-weight: 600; font-variant-numeric: tabular-nums; }
+.wiz-step.now { color: var(--ink) !important; box-shadow: inset 0 0 0 2px var(--green); }
+.wiz-step.now .n { background: var(--green); color: var(--on-green); }
+.wiz-step.done { color: var(--green-ink) !important; }
+.wiz-step.done .n { background: var(--green-soft); color: var(--green-ink); }
+.wiz-lead { margin: 0 0 1.2rem; font-size: 1.3rem; max-width: 52rem; }
+.wiz-lead b { font-weight: 600; }
+.wiz-sub { margin: 1.6rem 0 .8rem; font-size: 1.1rem; font-weight: 600; color: var(--muted); }
+.wiz-help { margin: 0 0 .8rem; color: var(--muted); }
+
+/* Paso 2: la semana en cuadrícula, un toque por comida */
+.when {
+  display: grid; grid-template-columns: minmax(6.5rem, auto) repeat(var(--n), minmax(0, 1fr)); gap: .5rem; align-items: stretch;
+  background: var(--paper); border-radius: var(--r-lg); padding: .9rem 1rem;
+}
+.when-meal, .when-day {
+  display: inline-flex; align-items: center; justify-content: center; gap: .35rem; min-height: 52px;
+  background: transparent !important; border-color: transparent !important; font-weight: 600; color: var(--ink);
+}
+.when-meal { font-size: .95rem; }
+.when-day { justify-content: flex-start; font-size: 1.1rem; }
+.when-day small { color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+.when-cell {
+  min-height: 64px; display: grid !important; place-items: center; align-content: center; gap: .1rem; padding: .3rem !important;
+  border-radius: var(--r-sm) !important; border: 0 !important; background: var(--paper-2) !important; color: var(--on-green) !important;
+}
+.when-cell.on { background: var(--green) !important; }
+.when-cell small { font-size: .78rem; font-weight: 600; }
+.when-cell.on.fixed { background: var(--green-soft) !important; color: var(--green-ink) !important; }
+.when-cell:disabled, .when-day:disabled { opacity: .35; }
+.wiz-keep { display: flex; align-items: center; gap: .7rem; margin-top: 1rem; font-size: 1.1rem; cursor: pointer; }
+.wiz-keep input { width: 1.5rem; height: 1.5rem; accent-color: var(--green); }
+
+/* Paso 3: el deslizador «De la casa ↔ Ideas nuevas» y los platos de la semana */
+.mix { background: var(--paper); border-radius: var(--r-lg); padding: 1rem 1.3rem 1.1rem; margin-bottom: 1rem; display: grid; gap: .4rem; }
+.mix-ends { display: flex; justify-content: space-between; gap: 1rem; font-size: 1.1rem; font-weight: 600; }
+.mix-ends span { display: inline-flex; align-items: center; gap: .4rem; }
+.mix-ends span:first-child { color: var(--green-ink); }
+.mix-ends span:last-child { color: var(--tint-lilac-ink); }
+.mix input[type="range"] { width: 100%; height: 48px; margin: 0; accent-color: var(--green); cursor: pointer; }
+.mix input[type="range"]:disabled { cursor: default; opacity: .45; }
+.mix-ticks { display: grid; grid-template-columns: repeat(5, 1fr); gap: .3rem; }
+.mix-ticks button {
+  min-height: 44px; padding: .3rem !important; font-size: .88rem; font-weight: 500; line-height: 1.2;
+  background: transparent !important; border-color: transparent !important; color: var(--muted);
+}
+.mix-ticks button.on { background: var(--green-soft) !important; color: var(--green-ink); font-weight: 600; }
+.mix-note { margin: .3rem 0 0; color: var(--muted); display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
+.mix-note b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.mix.off p { margin: 0; display: flex; align-items: center; gap: .5rem; color: var(--muted); }
+.spin { width: 18px; height: 18px; border-radius: 50%; border: 3px solid var(--line-strong); border-top-color: var(--green); animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.dishes { display: grid; gap: .8rem; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); }
+.dishes > .dish { grid-column: var(--col); }
+.dish {
+  display: grid !important; gap: .2rem; align-content: start; justify-items: start; justify-content: stretch; text-align: left; min-height: 128px; font-weight: 400;
+  padding: .8rem .95rem !important; border-radius: var(--r) !important; background: var(--paper-2) !important; border: 0 !important; color: var(--ink) !important;
+}
+button.dish:hover { box-shadow: inset 0 0 0 2px var(--green); }
+.dish .d-top { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .15rem; }
+.dish .d-meal { display: inline-flex; align-items: center; gap: .35rem; font-size: .78rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.dish .d-name { font-size: 1.1rem; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
+.dish .d-name.muted { color: var(--muted); }
+.dish .d-core { font-size: .88rem; color: var(--muted); }
+.dish .d-state { display: inline-flex; align-items: center; gap: .3rem; font-size: .88rem; }
+.dish .d-state.ok { color: var(--green-ink); }
+.dish .d-state.miss { color: var(--terra); }
+.dish .d-again { font-size: .88rem; font-weight: 500; color: var(--terra); }
+.dish .d-salad { width: 100%; display: flex; align-items: center; gap: .35rem; margin-top: .3rem; padding-top: .45rem; border-top: 1px dashed var(--line-strong); font-size: .95rem; color: var(--green-ink); }
+.dish .d-lock { display: inline-flex; align-items: center; gap: .25rem; font-size: .78rem; font-weight: 600; color: var(--muted); }
+.dish.empty { background: transparent !important; box-shadow: inset 0 0 0 2px var(--line-strong); }
+.dish.fixed { opacity: .7; }
+.src { flex: none; display: inline-flex; align-items: center; gap: .25rem; padding: .15rem .6rem; border-radius: 999px; font-size: .78rem; font-weight: 600; background: var(--paper); color: var(--muted); }
+.src.house { background: var(--green-soft); color: var(--green-ink); }
+.src.ai { background: var(--tint-lilac); color: var(--tint-lilac-ink); }
+.pick-h { display: flex; align-items: center; gap: .4rem; margin: 1rem 0 .3rem; font-size: 1.1rem; font-weight: 600; }
+.pick-list.short { max-height: none; }
+.pick-row.on { background: var(--green-mist); }
+.pick-row.on .pr-ic { color: var(--green); }
+
+/* Paso 4: resumen antes de guardar */
+.wiz-sum { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .8rem; margin-bottom: 1rem; }
+.sum-tile { background: var(--paper); border-radius: var(--r-lg); padding: .9rem 1.1rem; display: grid; }
+.sum-tile b { font-size: 2.2rem; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.sum-tile span { color: var(--muted); }
+.sum-tile.ai b { color: var(--tint-lilac-ink); }
+.sum-tile.buy b { color: var(--terra); }
+.wiz-note { padding: .2rem 1.3rem .9rem; }
+.wiz-note h3 { display: flex; align-items: center; gap: .4rem; }
+.wiz-note p { margin: .3rem 0 0; }
+.wiz-note.warn h3 { color: var(--honey); }
+.wiz-list { margin-top: 1rem; padding: .3rem 1.3rem; }
+.wl-row { display: grid; grid-template-columns: 5rem 9rem 1fr; gap: .8rem; align-items: center; padding: .65rem 0; }
+.wl-row + .wl-row { border-top: 1px solid var(--line); }
+.wl-day { font-weight: 600; font-variant-numeric: tabular-nums; }
+.wl-meal { display: inline-flex; align-items: center; gap: .35rem; color: var(--muted); }
+.wl-dish { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .5rem; font-weight: 500; }
+.wl-dish small { color: var(--muted); font-weight: 400; font-size: .95rem; }
+
+@media (max-width: 760px) {
+  .when { grid-template-columns: 4.2rem repeat(var(--n), minmax(0, 1fr)); padding: .6rem; gap: .35rem; }
+  .when-meal { font-size: 0; }  /* en el celular, solo el ícono */
+  .when-meal .i { width: 22px; height: 22px; }
+  .when-day { font-size: 1rem; padding: 0 !important; }
+  .wiz-step { font-size: 0; padding: .3rem !important; }
+  .wiz-step .n { font-size: 1rem; }
+  .wiz-step.now { font-size: 1rem; padding-right: 1rem !important; }
+  .wiz-bar { flex-wrap: nowrap; }
+  .wiz-bar .primary { flex: 1; justify-content: center; }
+  .wiz-bar #w-back .lbl { display: none; }
+  .mix-ticks button { font-size: .78rem; }
+  .wiz-sum { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dishes { grid-template-columns: 1fr; }
+  .dishes > .dish { grid-column: auto; }
+  .wl-row { grid-template-columns: 4rem 1fr; }
+  .wl-meal { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
 /* Tareas: filtrar por persona */
 .who-chips { display: flex; flex-wrap: wrap; gap: .5rem; margin: -.4rem 0 1rem; }
 .who-chip {

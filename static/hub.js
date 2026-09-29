@@ -29,6 +29,7 @@ let busy = false; // mientras se lee una factura no se vuelve al inicio
 const SCREENS = {
   home: renderHome, shopping: renderShopping, what: renderWhat, cook: renderCook, chores: renderChores, agenda: renderAgenda,
   inventory: renderInventory, invGroup: renderInvGroup, menu: renderMenu, kids: renderKids, stars: renderStars,
+  sunday: renderSunday,
 };
 
 function go(name, params = {}) {
@@ -59,7 +60,7 @@ let idleTimer = null;
 function resetIdle() {
   clearTimeout(idleTimer);
   // Revisando la nevera se pasa rato mirando adentro sin tocar la pantalla: ahí espera más.
-  const wait = screen === "invGroup" ? 5 * IDLE_MS : IDLE_MS;
+  const wait = ["invGroup", "sunday"].includes(screen) ? 5 * IDLE_MS : IDLE_MS;
   idleTimer = setTimeout(() => {
     if (busy || handsFree?.active || document.querySelector("dialog[open] .ring")) return resetIdle();
     $$("dialog.m[open]").forEach((d) => { d.close(); d.remove(); });
@@ -202,6 +203,7 @@ async function renderHome() {
   const current = PHOTOS[photoIdx];
   const inv = t.inventory ?? {};
   const weekend = [0, 6].includes(new Date().getDay());
+  const planDay = [5, 6, 0].includes(new Date().getDay()); // del viernes al domingo se arma la semana que viene
 
   app.innerHTML = `
     <div class="home">
@@ -237,9 +239,10 @@ async function renderHome() {
           <div class="w-head"><h2 class="w-title">${icon("plate", 22)} Hoy en la mesa</h2>
             ${t.setup.recipes ? headLink("menu", "Semana") : ""}</div>
           <div class="w-body">${t.meals.length ? t.meals.map(mealRow).join("")
-          : t.setup.recipes ? `<p class="empty-note">Todavía no hay menú para hoy.</p>
-             <div class="w-more"><button class="primary" data-act="menu">${icon("calendar", 20)} Armar el menú de la semana</button></div>`
-          : `<p class="empty-note">Cuando carguen sus recetas, aquí aparece lo que se come hoy.</p>`}</div>
+          : t.setup.recipes ? `<p class="empty-note">Todavía no hay menú para hoy.</p>`
+          : `<p class="empty-note">Cuando carguen sus recetas, aquí aparece lo que se come hoy.</p>`}
+          ${t.setup.recipes && (planDay || !t.meals.length) ? `<div class="w-more"><button class="primary" data-act="sunday">${icon("spark", 20)}
+            ${planDay ? "Armar el menú de la semana que viene" : "Armar el menú de la semana"}</button></div>` : ""}</div>
         </section>
 
         ${t.agenda?.length ? `<section class="widget">
@@ -276,7 +279,7 @@ async function renderHome() {
   const ACTS = {
     kids: () => go("stars"), scan: scanChooser, receipt: () => startScan("receipt"), shopping: () => go("shopping"), what: () => go("what"),
     ranout: ranOutModal, chores: () => go("chores"), photos: photosModal, agenda: () => go("agenda"),
-    inventory: () => go("inventory"), menu: () => go("menu"),
+    inventory: () => go("inventory"), menu: () => go("menu"), sunday: () => go("sunday", { start: wizWeek() }),
   };
   $$("[data-act]", app).forEach((b) => b.onclick = () => ACTS[b.dataset.act]());
   $$("[data-ev]", app).forEach((b) => b.onclick = () => {
@@ -1778,7 +1781,7 @@ async function renderMenu({ start } = {}) {
         ${thisWeek ? "" : `<button id="now">${icon("undo", 18)} Volver a esta semana</button>`}
       </div>
       <div class="menu-tools">
-        <button class="${empty ? "primary" : ""}" id="fill">${icon("spark", 20)} ${empty ? "Armar la semana" : "Llenar lo que falta"}</button>
+        <button class="${empty ? "primary" : ""}" id="fill">${icon("spark", 20)} ${empty ? "Armar la semana" : "Armar con lo que hay"}</button>
         <button id="to-list">${icon("basket", 20)} Lista de compras</button>
       </div>
     </div>
@@ -1804,20 +1807,8 @@ async function renderMenu({ start } = {}) {
   $("#next").onclick = () => go("menu", { start: isoDate(addDays(monday, 7)) });
   $("#now")?.addEventListener("click", () => go("menu"));
   $("#to-list").onclick = () => go("shopping");
-  $("#fill").onclick = (ev) => safe(async () => {
-    const btn = ev.currentTarget;
-    const ok = await confirmModal({
-      title: empty ? "¿Armamos la semana?" : "¿Llenamos lo que falta?",
-      text: "Se ponen sus recetas en las comidas vacías de la semana (desayuno, almuerzo, merienda y cena, según las recetas que tengan para cada una), usando primero lo que ya hay en la casa. Lo que ya está no se toca.",
-      ok: "Sí, llenar", okIcon: "spark",
-    });
-    if (!ok) return;
-    const created = await withBusy(btn, () => api("/api/menu/autoplan", { method: "POST", json: {
-      start: iso, days: 7, meal_types: meals,
-    } }));
-    toast(created.length ? `Se agregaron ${created.length} comidas` : "No quedaron espacios (o faltan recetas en Ajustes)");
-    again();
-  });
+  // El asistente: revisar qué hay, decir cuándo se come en casa y elegir entre la casa y las ideas nuevas.
+  $("#fill").onclick = () => go("sunday", { start: iso });
   $$("[data-add]", app).forEach((b) => b.onclick = () => {
     const [day, meal] = b.dataset.add.split("|");
     pickRecipeModal({ day, meal }, again);
@@ -1925,6 +1916,424 @@ async function pickRecipeModal({ day, meal, entry = null }, after) {
   draw();
 }
 
+// ---------------------------------------------------------------- menú del domingo (asistente)
+// El ritual del domingo en cuatro pasos: 1) revisar qué hay, 2) decir cuándo se come en casa,
+// 3) elegir el menú entre recetas de la casa e ideas nuevas de la IA (un deslizador de cinco
+// posiciones) y 4) guardarlo. Lo que se elige se guarda en el aparato: si la pantalla vuelve sola
+// al inicio, al abrir de nuevo sigue donde iba.
+
+const WIZ_KEY = "mychef-sunday";
+const WIZ_STEPS = ["¿Qué hay?", "¿Cuándo comen en casa?", "El menú", "Listo"];
+const MIX = ["Todo de la casa", "Más de la casa", "Mitad y mitad", "Más ideas nuevas", "Todo ideas nuevas"];
+const FIRST_GROUPS = ["proteinas", "granos", "verduras", "lacteos"]; // lo que manda en el menú
+const DAY_SHORT = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+
+let wiz = null;
+
+// La semana que se planea: desde el viernes, la que viene; si no, esta.
+function wizWeek() {
+  const now = new Date();
+  const monday = mondayOf(now);
+  return isoDate([5, 6, 0].includes(now.getDay()) ? addDays(monday, 7) : monday);
+}
+
+function wizLoad(start) {
+  try {
+    const d = JSON.parse(localStorage.getItem(WIZ_KEY) || "null");
+    if (d && d.start === start && Date.now() - d.saved < 18 * 3600 * 1000) return { ...d, ideasLoading: null };
+  } catch { /* sin almacenamiento */ }
+  return { start, step: 0, on: null, keep: true, mix: 2, plan: null, planKey: null, ideas: null, ideasKey: null,
+    ideasError: null, idea: {}, pick: {}, seenIdeas: {} };
+}
+function wizSave() {
+  try { localStorage.setItem(WIZ_KEY, JSON.stringify({ ...wiz, saved: Date.now() })); } catch { /* sin almacenamiento */ }
+}
+function wizClear() {
+  try { localStorage.removeItem(WIZ_KEY); } catch { /* sin almacenamiento */ }
+}
+
+const slotKey = (s) => `${s.day}|${s.meal}`;
+const dayOf = (iso) => new Date(`${iso}T12:00`);
+const dayName = (iso, long = false) => cap(dayOf(iso).toLocaleDateString("es", long ? { weekday: "long", day: "numeric", month: "long" } : { weekday: "long", day: "numeric" }));
+
+async function renderSunday({ start = null, step = null } = {}) {
+  const week = start ?? wiz?.start ?? wizWeek();
+  if (!wiz || wiz.start !== week) wiz = wizLoad(week);
+  if (step !== null) wiz.step = step;
+  wizSave();
+  const monday = dayOf(wiz.start);
+  const sunday = addDays(monday, 6);
+  const range = `${monday.toLocaleDateString("es", monday.getMonth() === sunday.getMonth() ? { day: "numeric" } : { day: "numeric", month: "short" })} al ${
+    sunday.toLocaleDateString("es", { day: "numeric", month: "short" })}`;
+  const steps = `<nav class="wiz-steps" aria-label="Pasos">${WIZ_STEPS.map((label, n) => `
+    <button class="wiz-step ${n === wiz.step ? "now" : n < wiz.step ? "done" : ""}" data-step="${n}" ${n < wiz.step ? "" : "disabled"}
+      ${n === wiz.step ? `aria-current="step"` : ""}><span class="n">${n < wiz.step ? icon("check", 18) : n + 1}</span>${label}</button>`).join("")}</nav>`;
+  const frame = (body, bar) => {
+    app.innerHTML = `${head(`Armar el menú · ${range}`)}${steps}${body}<div class="bottom-bar wiz-bar">${bar}</div>`;
+    bindBack();
+    $$("[data-step]", app).forEach((b) => b.onclick = () => go("sunday", { step: +b.dataset.step }));
+    $("#w-back")?.addEventListener("click", () => go("sunday", { step: wiz.step - 1 }));
+  };
+  await [wizInventory, wizWhen, wizChoose, wizDone][wiz.step](frame);
+}
+
+// ---------------------------------------------------------------- paso 1: ¿qué hay?
+
+async function wizInventory(frame) {
+  const data = await api("/api/inventory");
+  const groups = data.groups.filter((g) => g.key !== "aseo");
+  groups.sort((a, b) => (FIRST_GROUPS.indexOf(a.key) + 1 || 99) - (FIRST_GROUPS.indexOf(b.key) + 1 || 99));
+  const card = (g) => `
+    <button class="inv-card g-${g.key} ${g.reviewed_today ? "seen" : ""} ${g.items.length ? "" : "empty"}" data-g="${g.key}">
+      <span class="inv-ic">${icon(g.icon, 36)}</span>
+      <span class="inv-name">${esc(g.label)}</span>
+      <span class="inv-sub">${g.items.length ? plural(g.count, "cosa", "cosas") : "Vacío"}</span>
+      ${g.reviewed_today ? `<span class="inv-seen" aria-label="Revisado hoy">${icon("check", 20)}</span>` : ""}
+    </button>`;
+  const first = groups.filter((g) => FIRST_GROUPS.includes(g.key));
+  frame(`<p class="wiz-lead">Abran la nevera y la alacena y revisen, sobre todo, <b>las proteínas y las harinas</b>: el menú gira alrededor de eso.</p>
+    <div class="inv-grid">${first.map(card).join("")}</div>
+    <h2 class="wiz-sub">Lo demás, si quieren</h2>
+    <div class="inv-grid">${groups.filter((g) => !FIRST_GROUPS.includes(g.key)).map(card).join("")}</div>`,
+  `<button class="primary big" id="w-next">${first.every((g) => g.reviewed_today || !g.items.length) ? "Siguiente" : "Ya revisé, seguir"} ${icon("chevron")}</button>`);
+  $$("[data-g]", app).forEach((b) => b.onclick = () => go("invGroup", { key: b.dataset.g, back: "sunday" }));
+  $("#w-next").onclick = () => go("sunday", { step: 1 });
+}
+
+// ---------------------------------------------------------------- paso 2: ¿cuándo comen en casa?
+
+async function wizWhen(frame) {
+  const days = [...Array(7)].map((_, n) => isoDate(addDays(dayOf(wiz.start), n)));
+  const todayIso = isoDate(new Date());
+  const meals = [...META.meal_types].sort((a, b) => MEAL_ORDER.indexOf(a) - MEAL_ORDER.indexOf(b));
+  const [current, before] = await Promise.all([
+    api(`/api/menu?start=${wiz.start}&days=7`),
+    wiz.on ? null : api(`/api/menu?start=${isoDate(addDays(dayOf(wiz.start), -7))}&days=7`),
+  ]);
+  const fixed = new Map();
+  current.forEach((e) => fixed.set(`${e.day}|${e.meal_type}`, [...(fixed.get(`${e.day}|${e.meal_type}`) ?? []), e.recipe.name]));
+  if (!wiz.on) {
+    // Como la semana pasada; si no hubo menú, desayuno, almuerzo y cena (y la merienda si es de alguien).
+    const usual = new Set((before ?? []).map((e) => `${(dayOf(e.day).getDay() + 6) % 7}|${e.meal_type}`));
+    const defaults = ["desayuno", "almuerzo", "cena", ...(META.meal_people?.merienda?.length ? ["merienda"] : [])];
+    wiz.on = days.flatMap((d, n) => meals.filter((m) => (usual.size ? usual.has(`${n}|${m}`) : defaults.includes(m)))
+      .map((m) => `${d}|${m}`));
+    fixed.forEach((_, k) => { if (!wiz.on.includes(k)) wiz.on.push(k); });
+  }
+  const on = new Set(wiz.on.filter((k) => k.split("|")[0] >= todayIso));
+  const past = (d) => d < todayIso;
+
+  const draw = () => {
+    const count = on.size;
+    frame(`<p class="wiz-lead">Marquen las comidas que se hacen en casa. Tocando el día o la comida se marca toda la fila.</p>
+      <div class="when" style="--n:${meals.length}" role="grid">
+        <span></span>${meals.map((m) => `<button class="when-meal" data-col="${m}">${icon(MEAL_ICON[m], 20)} ${esc(MEAL_LABEL[m] ?? m)}</button>`).join("")}
+        ${days.map((d) => `
+          <button class="when-day" data-row="${d}" ${past(d) ? "disabled" : ""}>${DAY_SHORT[dayOf(d).getDay()]} <small>${dayOf(d).getDate()}</small></button>
+          ${meals.map((m) => {
+            const k = `${d}|${m}`;
+            const has = fixed.get(k);
+            return `<button class="when-cell ${on.has(k) ? "on" : ""} ${has && wiz.keep ? "fixed" : ""}" data-k="${k}" ${past(d) ? "disabled" : ""}
+              aria-pressed="${on.has(k)}" aria-label="${esc(MEAL_LABEL[m])} del ${esc(dayName(d))}${has ? `: ya está ${esc(has.join(", "))}` : ""}">
+              ${on.has(k) ? icon("check", 22) : ""}${has && on.has(k) ? `<small>${wiz.keep ? "Ya está" : "Se rehace"}</small>` : ""}</button>`;
+          }).join("")}`).join("")}
+      </div>
+      ${fixed.size ? `<label class="wiz-keep"><input type="checkbox" id="w-keep" ${wiz.keep ? "" : "checked"}>
+        <span>Rehacer también lo que ya estaba en el menú (${plural(fixed.size, "comida", "comidas")})</span></label>` : ""}`,
+    `<button id="w-back" aria-label="Atrás">${icon("back")}<span class="lbl"> Atrás</span></button>
+      <button class="primary big" id="w-next" ${count ? "" : "disabled"}>${count ? `${plural(count, "comida", "comidas")} · Siguiente` : "Marquen al menos una"} ${icon("chevron")}</button>`);
+    const flip = (keys) => {
+      const open = keys.filter((k) => !past(k.split("|")[0]));
+      const all = open.every((k) => on.has(k));
+      open.forEach((k) => (all ? on.delete(k) : on.add(k)));
+      wiz.on = [...on];
+      wizSave();
+      draw();
+    };
+    $$("[data-k]", app).forEach((b) => b.onclick = () => flip([b.dataset.k]));
+    $$("[data-row]", app).forEach((b) => b.onclick = () => flip(meals.map((m) => `${b.dataset.row}|${m}`)));
+    $$("[data-col]", app).forEach((b) => b.onclick = () => flip(days.map((d) => `${d}|${b.dataset.col}`)));
+    $("#w-keep")?.addEventListener("change", (e) => { wiz.keep = !e.target.checked; wizSave(); draw(); });
+    $("#w-next").onclick = () => go("sunday", { step: 2 });
+  };
+  draw();
+}
+
+// ---------------------------------------------------------------- paso 3: el menú
+
+const wizSlots = () => (wiz.plan?.slots ?? []);
+const freeSlots = () => wizSlots().filter((s) => !s.fixed);
+
+async function wizPlan() {
+  const key = JSON.stringify([wiz.on.slice().sort(), wiz.keep]);
+  if (wiz.plan && wiz.planKey === key) return;
+  const slots = wiz.on.map((k) => { const [day, meal] = k.split("|"); return { day, meal }; });
+  wiz.plan = await api("/api/menu/plan", { method: "POST", json: { start: wiz.start, slots, keep_existing: wiz.keep } });
+  wiz.planKey = key;
+  wiz.pick = {};
+  wizSave();
+}
+
+// Las ideas de la IA se piden una vez por semana armada; el deslizador solo decide cuántas se usan.
+function wizAskIdeas(redraw) {
+  const free = freeSlots();
+  const key = JSON.stringify(free.map(slotKey));
+  if (!free.length || (wiz.ideasKey === key && (wiz.ideas || wiz.ideasError)) || wiz.ideasLoading === key) return;
+  wiz.ideasLoading = key;
+  wiz.ideasError = null;
+  api("/api/menu/ideas", { method: "POST", json: {
+    start: wiz.start, slots: free.map((s) => ({ day: s.day, meal: s.meal, servings: s.adults, kids: s.kids })),
+  } }).then((res) => {
+    wiz.ideas = res;
+    wiz.idea = Object.fromEntries(res.slots.map((s) => [slotKey(s), { main: s.main, salad: s.salad ?? null }]));
+    wiz.seenIdeas = Object.fromEntries(res.slots.map((s) => [slotKey(s), [s.main?.recipe.name, s.salad?.recipe.name].filter(Boolean)]));
+  }).catch((e) => {
+    wiz.ideasError = { message: e.message, noKey: e.status === 503 };
+  }).finally(() => {
+    wiz.ideasKey = key;
+    wiz.ideasLoading = null;
+    wizSave();
+    if (screen === "sunday" && wiz.step === 2) redraw();
+  });
+}
+
+// Qué va en cada comida: lo que eligieron a mano, o lo que dice el deslizador.
+function chosen(s) {
+  if (s.fixed) return null;
+  const k = slotKey(s);
+  const idea = wiz.idea[k] ?? {};
+  const pick = wiz.pick[k];
+  let main;
+  let salad;
+  if (pick) {
+    ({ main, salad } = pick);
+  } else {
+    const useAi = aiSlots().has(k);
+    main = useAi ? { src: "ai" } : s.main ? { src: "house", i: 0 } : null;
+    const hasSalad = "salad" in s;
+    salad = !hasSalad ? null
+      : useAi && idea.salad ? { src: "ai" }
+      : s.salad ? { src: "house", i: 0 }
+      : idea.salad && wiz.mix > 0 ? { src: "ai" } : null;
+  }
+  const get = (c, kind) => {
+    if (!c) return null;
+    if (c.src === "ai") return idea[kind] ? { ...idea[kind], src: "ai" } : null;
+    const list = kind === "main" ? s.main_options : s.salad_options;
+    return list?.[c.i] ? { ...list[c.i], src: "house" } : null;
+  };
+  return { main: get(main, "main"), salad: get(salad, "salad"), locked: !!pick };
+}
+
+function aiSlots() {
+  const free = freeSlots().filter((s) => wiz.idea[slotKey(s)]?.main);
+  const n = Math.round((wiz.mix / 4) * freeSlots().length);
+  return new Set(free.sort((a, b) => a.ai_rank - b.ai_rank).slice(0, n).map(slotKey));
+}
+
+function dishState(c) {
+  if (c.can_cook) return `<span class="d-state ok">${icon("check", 16)} Tenemos todo</span>`;
+  return `<span class="d-state miss">Falta: ${esc(c.missing.map((m) => m.name).join(", "))}</span>`;
+}
+
+async function wizChoose(frame) {
+  frame(`<div class="state-block">${icon("spark", 44)}<h2>Armando la semana con lo que hay…</h2></div>`, "");
+  try {
+    await wizPlan();
+  } catch (e) {
+    frame(`<div class="state-block">${icon("warn", 44)}<h2>No se pudo armar la semana</h2><p>${esc(e.message)}</p>
+      <button class="primary" id="w-again">${icon("undo")} Intentar de nuevo</button></div>`, `<button id="w-back" aria-label="Atrás">${icon("back")}<span class="lbl"> Atrás</span></button>`);
+    $("#w-again").onclick = () => go("sunday", { step: 2 });
+    return;
+  }
+  const draw = () => {
+    wizAskIdeas(draw);
+    const loading = wiz.ideasLoading;
+    const err = wiz.ideasError;
+    const byDay = new Map();
+    wizSlots().forEach((s) => byDay.set(s.day, [...(byDay.get(s.day) ?? []), s]));
+    // Cada comida en su columna, para que los días se lean como una tabla
+    const cols = MEAL_ORDER.filter((m) => wizSlots().some((s) => s.meal === m));
+    const col = (s) => `style="--col:${cols.indexOf(s.meal) + 1}"`;
+    let nAi = 0;
+    let nHouse = 0;
+    const card = (s) => {
+      const k = slotKey(s);
+      if (s.fixed) {
+        return `<div class="dish fixed" ${col(s)}><span class="d-top"><span class="d-meal">${icon(MEAL_ICON[s.meal], 18)} ${esc(MEAL_LABEL[s.meal])}</span>
+          <span class="src">Ya estaba</span></span><span class="d-name">${esc(s.entries.map((e) => e.recipe.name).join(" + "))}</span></div>`;
+      }
+      const c = chosen(s);
+      if (c.main?.src === "ai") nAi += 1; else if (c.main) nHouse += 1;
+      const m = c.main;
+      const core = m ? [m.protein, m.starch].filter(Boolean).join(" · ") : "";
+      const again = m && (m.repeat ? "Repite de la semana pasada" : m.again ? "Se repite en la semana" : "");
+      return `<button class="dish ${m ? "" : "empty"}" data-k="${k}" ${col(s)}>
+        <span class="d-top"><span class="d-meal">${icon(MEAL_ICON[s.meal], 18)} ${esc(MEAL_LABEL[s.meal])}</span>
+          ${m ? `<span class="src ${m.src}">${m.src === "ai" ? `${icon("spark", 14)} Idea nueva` : "De la casa"}</span>` : ""}</span>
+        ${m ? `<span class="d-name">${esc(m.recipe.name)}</span>
+          ${core ? `<span class="d-core">${esc(core)}</span>` : ""}
+          ${dishState(m)}
+          ${again ? `<span class="d-again">${esc(again)}</span>` : ""}`
+        : `<span class="d-name muted">Sin receta</span><span class="d-core">Toquen para elegir</span>`}
+        ${"salad" in s ? `<span class="d-salad">${icon(c.salad?.src === "ai" ? "spark" : "leaf", 16)} ${c.salad ? esc(c.salad.recipe.name) : "Sin ensalada"}</span>` : ""}
+        ${c.locked ? `<span class="d-lock">${icon("check", 14)} Elegido a mano</span>` : ""}
+      </button>`;
+    };
+    const days = [...byDay].map(([day, list]) => `
+      <section class="menu-day wiz-day"><h2>${esc(cap(dayOf(day).toLocaleDateString("es", { weekday: "long" })))} <small>${dayOf(day).getDate()}</small></h2>
+        <div class="dishes" style="--n:${cols.length}">${list.map(card).join("")}</div></section>`).join("");
+    const mixBox = err?.noKey
+      ? `<div class="mix off"><p>${icon("spark", 20)} Para mezclar con ideas nuevas de la IA, configúrenla en Ajustes → Casa. Por ahora, todo es de la casa.</p></div>`
+      : `<div class="mix ${loading ? "busy" : ""}">
+          <div class="mix-ends"><span>${icon("home", 20)} De la casa</span><span>Ideas nuevas ${icon("spark", 20)}</span></div>
+          <input type="range" id="w-mix" min="0" max="4" step="1" value="${wiz.mix}" ${loading || err || !wiz.ideas ? "disabled" : ""}
+            aria-label="De la casa o ideas nuevas" aria-valuetext="${MIX[wiz.mix]}">
+          <div class="mix-ticks">${MIX.map((t, n) => `<button data-mix="${n}" class="${n === wiz.mix ? "on" : ""}" ${loading || err || !wiz.ideas ? "disabled" : ""}>${t}</button>`).join("")}</div>
+          <p class="mix-note">${loading ? `<span class="spin" aria-hidden="true"></span> La IA está pensando ideas con lo que hay. Puede tardar un minuto; mientras, ya pueden ver la semana.`
+            : err ? `No llegaron las ideas nuevas: ${esc(err.message)} <button class="btn-soft" id="w-retry">${icon("undo", 18)} Intentar de nuevo</button>`
+            : `<b>${nHouse}</b> de la casa · <b>${nAi}</b> ${nAi === 1 ? "idea nueva" : "ideas nuevas"}${wiz.ideas?.errors?.length ? ` · Algunas comidas se quedaron sin ideas` : ""}`}</p>
+        </div>`;
+    frame(`${mixBox}<p class="wiz-help">Toquen un plato para cambiarlo.</p><div class="week">${days}</div>`,
+      `<button id="w-back" aria-label="Atrás">${icon("back")}<span class="lbl"> Atrás</span></button>
+       <button class="primary big" id="w-next">Siguiente ${icon("chevron")}</button>`);
+    const setMix = (n) => { wiz.mix = n; wizSave(); draw(); };
+    $("#w-mix")?.addEventListener("change", (e) => setMix(+e.target.value));
+    $$("[data-mix]", app).forEach((b) => b.onclick = () => setMix(+b.dataset.mix));
+    $("#w-retry")?.addEventListener("click", () => { wiz.ideasKey = null; wiz.ideasError = null; draw(); });
+    $$(".dish[data-k]", app).forEach((b) => b.onclick = () => dishModal(wizSlots().find((s) => slotKey(s) === b.dataset.k), draw));
+    $("#w-next").onclick = () => go("sunday", { step: 3 });
+  };
+  draw();
+}
+
+// Cambiar un plato: la idea nueva (y pedir otra), las recetas de la casa y la ensalada del almuerzo.
+function dishModal(s, redraw) {
+  const k = slotKey(s);
+  const cur = chosen(s);
+  const sel = {
+    main: cur.main ? (cur.main.src === "ai" ? { src: "ai" } : { src: "house", i: s.main_options.findIndex((o) => o.recipe.id === cur.main.recipe.id) }) : null,
+    salad: cur.salad ? (cur.salad.src === "ai" ? { src: "ai" } : { src: "house", i: s.salad_options.findIndex((o) => o.recipe.id === cur.salad.recipe.id) }) : null,
+  };
+  const same = (a, b) => (a && b ? a.src === b.src && (a.src === "ai" || a.i === b.i) : a === b);
+  const row = (kind, c, choice) => `
+    <button class="pick-row ${same(sel[kind], choice) ? "on" : ""}" data-kind="${kind}" data-c='${JSON.stringify(choice)}'>
+      <span class="pr-ic">${same(sel[kind], choice) ? icon("check", 22) : icon(choice?.src === "ai" ? "spark" : kind === "salad" ? "leaf" : "pot", 22)}</span>
+      <span class="pr-txt"><b>${esc(c ? c.recipe.name : "Sin ensalada")}</b>
+        ${c ? `<small class="${c.can_cook ? "ok" : "miss"}">${[c.protein, c.starch].filter(Boolean).map(esc).join(" · ")}${c.protein || c.starch ? " · " : ""}${
+          c.can_cook ? "Tenemos todo" : `Falta: ${esc(c.missing.map((x) => x.name).join(", "))}`}</small>` : ""}</span>
+      ${c?.repeat ? `<span class="ago recent">Semana pasada</span>` : c?.again ? `<span class="ago">Ya está esta semana</span>` : ""}
+    </button>`;
+  const body = () => {
+    const idea = wiz.idea[k] ?? {};
+    return `<p class="m-text">${esc(dayName(s.day))} · ${esc(peopleText(s.adults, s.kids))}</p>
+      ${wiz.ideas || wiz.idea[k] ? `<h3 class="pick-h">${icon("spark", 20)} Idea nueva</h3>
+        <div class="pick-list short">${idea.main ? row("main", idea.main, { src: "ai" }) : `<p class="empty-note">No hay idea para esta comida.</p>`}</div>
+        <button class="btn-soft" id="d-more">${icon("undo", 18)} Pedir otra idea</button>` : ""}
+      <h3 class="pick-h">${icon("home", 20)} De la casa</h3>
+      <div class="pick-list short">${s.main_options.map((c, i) => row("main", c, { src: "house", i })).join("") || `<p class="empty-note">No hay recetas de la casa para esta comida.</p>`}</div>
+      ${"salad" in s ? `<h3 class="pick-h">${icon("leaf", 20)} Ensalada</h3>
+        <div class="pick-list short">${idea.salad ? row("salad", idea.salad, { src: "ai" }) : ""}
+          ${s.salad_options.map((c, i) => row("salad", c, { src: "house", i })).join("")}${row("salad", null, null)}</div>` : ""}`;
+  };
+  const m = modal({
+    title: `${esc(MEAL_LABEL[s.meal])} del ${esc(dayName(s.day).toLowerCase())}`, size: "wide", body: `<div id="dm">${body()}</div>`,
+    actions: [
+      ...(wiz.pick[k] ? [{ label: "Como diga el deslizador", icon: "undo", value: "auto" }] : []),
+      { label: "Listo", tone: "primary", icon: "check", value: "ok" },
+    ],
+  });
+  const box = $("#dm", m.el);
+  const bind = () => {
+    $$("[data-kind]", box).forEach((b) => b.onclick = () => {
+      sel[b.dataset.kind] = JSON.parse(b.dataset.c);
+      wiz.pick[k] = { ...sel };
+      wizSave();
+      box.innerHTML = body();
+      bind();
+    });
+    $("#d-more", box)?.addEventListener("click", (e) => withBusy(e.currentTarget, async () => {
+      const res = await safe(() => api("/api/menu/ideas", { method: "POST", json: {
+        start: wiz.start, slots: [{ day: s.day, meal: s.meal, servings: s.adults, kids: s.kids }], avoid: wiz.seenIdeas[k] ?? [],
+      } }));
+      const got = res?.slots?.[0];
+      if (!got?.main) return res && toast("La IA no dio otra idea; intenten de nuevo");
+      wiz.idea[k] = { main: got.main, salad: got.salad ?? wiz.idea[k]?.salad ?? null };
+      wiz.seenIdeas[k] = [...(wiz.seenIdeas[k] ?? []), got.main.recipe.name, got.salad?.recipe.name].filter(Boolean);
+      sel.main = { src: "ai" };
+      if (got.salad) sel.salad = { src: "ai" };
+      wiz.pick[k] = { ...sel };
+      wizSave();
+      box.innerHTML = body();
+      bind();
+    }));
+  };
+  bind();
+  m.done.then((v) => {
+    if (v === "auto") { delete wiz.pick[k]; wizSave(); }
+    redraw();
+  });
+}
+
+// ---------------------------------------------------------------- paso 4: listo
+
+async function wizDone(frame) {
+  if (!wiz.plan) return go("sunday", { step: 2 });
+  const today = await api("/api/today").catch(() => null);
+  const rows = [];
+  const buy = new Map();
+  const used = new Set();
+  let nAi = 0;
+  let nHouse = 0;
+  for (const s of wizSlots()) {
+    if (s.fixed) continue;
+    const c = chosen(s);
+    if (!c.main) continue;
+    if (c.main.src === "ai") nAi += 1; else nHouse += 1;
+    for (const d of [c.main, c.salad].filter(Boolean)) {
+      d.missing.forEach((x) => buy.set(x.name, x));
+      d.uses_expiring?.forEach((n) => used.add(n.toLowerCase()));
+      d.draft?.ingredients.forEach((i) => used.add(i.name.toLowerCase()));
+    }
+    rows.push({ s, c });
+  }
+  const wasted = (today?.expiring ?? []).filter((e) => !used.has(e.name.toLowerCase()));
+  const empty = freeSlots().filter((s) => !chosen(s).main);
+  frame(`<div class="wiz-sum">
+      <div class="sum-tile"><b>${rows.length}</b><span>${rows.length === 1 ? "comida" : "comidas"}</span></div>
+      <div class="sum-tile"><b>${nHouse}</b><span>de la casa</span></div>
+      <div class="sum-tile ai"><b>${nAi}</b><span>${nAi === 1 ? "idea nueva" : "ideas nuevas"}</span></div>
+      <div class="sum-tile buy"><b>${buy.size}</b><span>para comprar</span></div>
+    </div>
+    ${buy.size ? `<section class="sheet wiz-note"><h3>${icon("basket", 20)} Pasa a la lista de compras</h3><p>${esc([...buy.keys()].join(", "))}</p></section>` : ""}
+    ${wasted.length ? `<section class="sheet wiz-note warn"><h3>${icon("clock", 20)} Se vence y no quedó en el menú</h3><p>${esc(wasted.map((e) => e.name).join(", "))}</p></section>` : ""}
+    ${empty.length ? `<section class="sheet wiz-note warn"><h3>${icon("warn", 20)} Quedan sin receta</h3><p>${esc(empty.map((s) => `${MEAL_LABEL[s.meal]} del ${dayName(s.day).toLowerCase()}`).join(", "))}. Se pueden llenar después en el menú.</p></section>` : ""}
+    <section class="sheet wiz-list">${rows.map(({ s, c }) => `
+      <div class="wl-row"><span class="wl-day">${DAY_SHORT[dayOf(s.day).getDay()]} ${dayOf(s.day).getDate()}</span>
+        <span class="wl-meal">${icon(MEAL_ICON[s.meal], 18)} ${esc(MEAL_LABEL[s.meal])}</span>
+        <span class="wl-dish">${esc(c.main.recipe.name)}${c.salad ? ` <small>+ ${esc(c.salad.recipe.name)}</small>` : ""}
+          ${c.main.src === "ai" ? `<span class="src ai">${icon("spark", 14)} Idea nueva</span>` : ""}</span></div>`).join("")}</section>
+    ${nAi ? `<p class="wiz-help">Las ideas nuevas quedan como recetas de prueba: se pueden ver y cocinar como cualquier otra.</p>` : ""}`,
+  `<button id="w-back" aria-label="Atrás">${icon("back")}<span class="lbl"> Atrás</span></button>
+   <button class="primary big" id="w-save" ${rows.length ? "" : "disabled"}>${icon("check")} Guardar el menú</button>`);
+  $("#w-save").onclick = (e) => safe(async () => {
+    const entries = [];
+    for (const { s, c } of rows) {
+      for (const d of [c.main, c.salad].filter(Boolean)) {
+        entries.push({ day: s.day, meal_type: s.meal, servings: s.adults, kids: s.kids,
+          ...(d.src === "ai" ? { new_recipe: d.draft } : { recipe_id: d.recipe.id }) });
+      }
+    }
+    const replace = freeSlots().map((s) => ({ day: s.day, meal: s.meal }));
+    await withBusy(e.currentTarget, () => api("/api/menu/week", { method: "POST", json: { entries, replace } }));
+    const start = wiz.start;
+    wizClear();
+    wiz = null;
+    await doneModal("¡Menú listo!", buy.size ? "Lo que falta ya está en la lista de compras." : "Tienen todo lo que hace falta.");
+    go("menu", { start });
+  });
+}
+
 // ---------------------------------------------------------------- ¿qué hay? (revisar la casa)
 // El repaso del fin de semana: con la nevera abierta, grupo por grupo (proteínas, lácteos…),
 // cada cosa se marca como Hay, Poco o Se acabó. Poco y Se acabó pasan a la lista de compras.
@@ -1966,7 +2375,8 @@ async function renderInventory() {
   $$("[data-g]", app).forEach((b) => b.onclick = () => go("invGroup", { key: b.dataset.g }));
 }
 
-async function renderInvGroup({ key }) {
+async function renderInvGroup({ key, back = null }) {
+  const out = () => (back ? go(back) : go("inventory"));
   const data = await api("/api/inventory");
   const g = data.groups.find((x) => x.key === key);
   const changes = new Map(); // id -> { state, quantity }
@@ -2001,7 +2411,7 @@ async function renderInvGroup({ key }) {
   const draw = () => {
     const n = changes.size;
     const toList = [...changes.values()].filter((c) => c.state !== "ok").length;
-    app.innerHTML = `${head(esc(g.label), "Volver a los grupos")}
+    app.innerHTML = `${head(esc(g.label), back ? "Volver al menú de la semana" : "Volver a los grupos")}
       <p class="inv-help">Toquen <b>Hay</b>, <b>Poco</b> o <b>Se acabó</b>. Lo que quede poco o se acabe pasa a la lista de compras.
         Toquen el nombre para corregir cuánto hay.</p>
       ${g.items.length ? `<div class="sheet inv-sheet">${g.items.map(row).join("")}</div>`
@@ -2050,13 +2460,13 @@ async function renderInvGroup({ key }) {
     toast(res.to_list.length
       ? `${g.label} al día. A la lista: ${res.to_list.join(", ")}`
       : `${g.label} al día`, 3600);
-    go("inventory");
+    out();
   };
 
   // Volver sin tocar «Listo»: si marcaron algo, se guarda igual (nada se pierde).
   const leave = () => safe(async () => {
     if (changes.size) await save($("#save"));
-    else go("inventory");
+    else out();
   });
 
   draw();

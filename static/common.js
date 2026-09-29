@@ -30,7 +30,9 @@ export async function api(path, opts = {}) {
       ? "Algo salió mal en el computador de la casa. Intenten de nuevo en un momento."
       : "No se pudo completar. Intenten de nuevo.");
     if (Array.isArray(msg)) msg = msg.map((d) => d.msg).join("; ");
-    throw new Error(msg);
+    const err = new Error(msg);
+    err.status = res.status; // p. ej. 503 = falta configurar la IA
+    throw err;
   }
   return data;
 }
