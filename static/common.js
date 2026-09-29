@@ -275,13 +275,62 @@ export function fmtAmount(q, unit) {
   return `${fmtQty(n)} ${fmtUnit(n, u)}`;
 }
 
-// ---------------------------------------------------------------- PIN de la casa
+// ---------------------------------------------------------------- entrar: usuario y contraseña, o PIN de la casa
 
 let pinPromise = null;
 
-export function askPin() {
+export async function askPin() {
   if (pinPromise) return pinPromise;
-  pinPromise = new Promise((resolve) => {
+  const auth = await fetch("/api/auth").then((r) => r.json()).catch(() => ({}));
+  if (pinPromise) return pinPromise;
+  pinPromise = auth.mode === "password" ? askPassword() : askPinPad();
+  return pinPromise;
+}
+
+function askPassword() {
+  return new Promise((resolve) => {
+    const box = document.createElement("div");
+    box.className = "pin-screen";
+    box.innerHTML = `
+      <form class="pin-card login-card" autocomplete="on">
+        <div class="pin-emoji">${icon("home", 44)}</div>
+        <h2>Nuestra casa</h2>
+        <label class="field">Usuario<input name="user" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
+        <label class="field">Contraseña<input name="password" type="password" autocomplete="current-password" required></label>
+        <div class="pin-error" role="alert"></div>
+        <button class="primary" type="submit">${icon("check", 20)} Entrar</button>
+        <p class="muted small">Cada aparato entra una sola vez y queda recordado.</p>
+      </form>`;
+    document.body.appendChild(box);
+    const f = $("form", box);
+    const err = $(".pin-error", box);
+    f.user.focus();
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      err.textContent = "";
+      const btn = $("button", f);
+      btn.disabled = true;
+      const res = await fetch("/api/login", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user: f.user.value, password: f.password.value }),
+      }).catch(() => null);
+      btn.disabled = false;
+      if (res?.ok) {
+        box.remove();
+        pinPromise = null;
+        resolve();
+        return;
+      }
+      const data = await res?.json().catch(() => ({}));
+      err.textContent = data?.detail || "No hay conexión con el computador de la casa.";
+      f.password.value = "";
+      f.password.focus();
+    };
+  });
+}
+
+function askPinPad() {
+  return new Promise((resolve) => {
     const box = document.createElement("div");
     box.className = "pin-screen";
     box.innerHTML = `
@@ -325,7 +374,6 @@ export function askPin() {
       draw();
     });
   });
-  return pinPromise;
 }
 
 // Convierte una línea de la lista de compras en lo que se suma al inventario.

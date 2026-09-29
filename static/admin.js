@@ -37,7 +37,7 @@ modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); }
 
 // ------------------------------------------------------------------ navegación
 
-const VIEWS = { cook: renderCook, recipes: renderRecipes, pantry: renderPantry, shopping: renderShopping, house: renderHouse, chores: renderChoresAdmin, prizes: renderPrizes };
+const VIEWS = { cook: renderCook, recipes: renderRecipes, pantry: renderPantry, shopping: renderShopping, house: renderHouse, taste: renderTaste, chores: renderChoresAdmin, prizes: renderPrizes };
 let current = "recipes";
 
 function go(name) {
@@ -812,6 +812,7 @@ async function renderHouse() {
           <input type="checkbox" id="wake-on" style="width:1.4rem;height:1.4rem"></label>
         <p class="muted small" style="margin:0">Se activa en cada tablet por separado: háganlo desde la tablet de la nevera.
           Mientras está activo, la pantalla de la casa escucha sin tener que tocarla.</p>` : ""}
+        <div id="logout-row"></div>
       </section>
       <section class="card stack" id="voice-card">
         <h2>Voz de esta tablet</h2>
@@ -897,6 +898,19 @@ async function renderHouse() {
   $("#v-test").onclick = () => speak(`Hola, soy ${META.house_name}. Hoy hay arroz con pollo de almuerzo.`, { force: true });
   bindAI();
   renderGCal();
+  api("/api/auth").then((a) => {
+    if (!a.mode) return;
+    const row = $("#logout-row");
+    row.className = "row spread";
+    row.style.cssText = "border-top:1px dashed var(--line);padding-top:.75rem";
+    row.innerHTML = `<span class="muted small">${a.mode === "password" ? "Entraron con usuario y contraseña." : "Entraron con el PIN de la casa."}</span>
+      <button class="ghost" id="logout">Cerrar sesión aquí</button>`;
+    $("#logout").onclick = async () => {
+      if (!await confirmModal({ title: "¿Cerrar sesión en este aparato?", text: "Para volver a entrar se piden otra vez los datos. Los demás aparatos siguen igual.", ok: "Cerrar sesión" })) return;
+      await api("/api/logout", { method: "POST" });
+      location.reload();
+    };
+  }).catch(() => {});
   const wakeBox = $("#wake-on");
   if (wakeBox) {
     try { wakeBox.checked = localStorage.getItem(WAKE_KEY) === "1"; } catch { /* sin almacenamiento */ }
@@ -953,6 +967,125 @@ async function renderHouse() {
     await api(`/api/members/${b.dataset.delM}`, { method: "DELETE" });
     renderHouse();
   }));
+}
+
+// ------------------------------------------------------------------ cómo comemos
+// Lo que la IA sabe de la cocina de la casa antes de proponer recetas: dónde viven y compran, qué tanto
+// arriesgar y un resumen de gustos que sale de un cuestionario (y que se puede corregir a mano).
+
+const ADV_LABEL = { fija: "Ir a la fija", mezcla: "Un poco de todo", explorar: "Explorar sabores nuevos" };
+
+async function renderTaste() {
+  const t = await api("/api/taste");
+  const stores = [...t.stores_options, ...t.stores.filter((s) => !t.stores_options.includes(s))];
+  const adv = (k) => t.adventure_options.find((a) => a.key === k)?.text ?? "";
+  const updated = t.updated_on ? new Date(t.updated_on + "T12:00").toLocaleDateString("es", { dateStyle: "long" }) : null;
+  view.innerHTML = `
+    <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(320px,1fr))">
+      <section class="card stack">
+        <h2>Dónde viven</h2>
+        <p class="muted small" style="margin:0">Para que las recetas nuevas usen cosas que se consiguen fácil cerca de la casa.</p>
+        <div class="form-grid">
+          <label class="field">Ciudad<input id="t-city" value="${esc(t.city)}" maxlength="60" placeholder="Medellín"></label>
+          <label class="field">Barrio<input id="t-area" value="${esc(t.area)}" maxlength="60" placeholder="Laureles"></label>
+        </div>
+        <div class="field">¿Dónde compran?
+          <div class="seg" id="t-stores">${stores.map((s) => `
+            <label><input type="checkbox" value="${esc(s)}" ${t.stores.includes(s) ? "checked" : ""}><span>${esc(s)}</span></label>`).join("")}</div></div>
+        <form class="row" id="t-store-add"><input id="t-store-new" maxlength="40" placeholder="Otro lugar" style="flex:1">
+          <button>${icon("plus", 18)} Agregar</button></form>
+      </section>
+      <section class="card stack">
+        <h2>Ideas nuevas</h2>
+        <p class="muted small" style="margin:0">Cuando la IA propone recetas para el menú, ¿qué tanto se arriesga?</p>
+        <div class="seg" id="t-adv">${t.adventure_options.map((a) => `
+          <label><input type="radio" name="adv" value="${a.key}" ${a.key === t.adventure ? "checked" : ""}><span>${ADV_LABEL[a.key]}</span></label>`).join("")}</div>
+        <p class="small" id="t-adv-text" style="margin:0">${esc(adv(t.adventure))}</p>
+      </section>
+      <section class="card stack" style="grid-column:1/-1">
+        <h2>Así comen ustedes</h2>
+        ${t.summary ? `
+          <p class="muted small" style="margin:0">La IA lo tiene en cuenta cada vez que propone recetas. Lo pueden corregir aquí mismo, una idea por línea.</p>
+          <textarea id="t-summary" rows="${Math.min(14, t.summary.split("\n").length + 2)}" maxlength="3000">${esc(t.summary)}</textarea>
+          <div class="row spread">
+            <span class="muted small">${updated ? `Actualizado el ${esc(updated)}` : ""}</span>
+            <span class="row"><button id="t-quiz" ${t.ai_ready ? "" : "disabled"}>${icon("spark", 18)} Rehacer el cuestionario</button>
+              <button class="primary" id="t-save">${icon("check", 18)} Guardar cambios</button></span>
+          </div>` : `
+          <p style="margin:0">La IA lee las recetas que ya tienen y les hace unas preguntas cortas sobre cómo comen: lo que no se come en la casa,
+            el picante, qué les gusta a los niños, cuánto tiempo hay para cocinar… Con eso escribe un resumen que después pueden corregir.</p>
+          <div><button class="primary" id="t-quiz" ${t.ai_ready ? "" : "disabled"}>${icon("spark", 20)} Hacer el cuestionario</button></div>`}
+        ${t.ai_ready ? "" : `<p class="small" style="margin:0"><span class="badge warn">Falta ${esc(META.ai.text.key_env)}</span>
+          El cuestionario usa la IA de texto (Casa → Inteligencia artificial).</p>`}
+      </section>
+    </div>`;
+
+  const put = (json, msg) => safe(async () => { await api("/api/taste", { method: "PUT", json }); if (msg) toast(msg); });
+  $("#t-city").onchange = (e) => put({ city: e.target.value }, "Ciudad guardada");
+  $("#t-area").onchange = (e) => put({ area: e.target.value }, "Barrio guardado");
+  const readStores = () => $$("#t-stores input:checked").map((i) => i.value);
+  $$("#t-stores input").forEach((i) => i.onchange = () => put({ stores: readStores() }));
+  $("#t-store-add").onsubmit = async (e) => {
+    e.preventDefault();
+    const name = $("#t-store-new").value.trim();
+    if (!name) return;
+    await put({ stores: [...readStores(), name] });
+    renderTaste();
+  };
+  $$("#t-adv input").forEach((i) => i.onchange = () => {
+    $("#t-adv-text").textContent = adv(i.value);
+    put({ adventure: i.value }, `Ideas nuevas: ${ADV_LABEL[i.value].toLowerCase()}`);
+  });
+  $("#t-save")?.addEventListener("click", (e) => withBusy(e.currentTarget, async () => {
+    const ok = await safe(() => api("/api/taste", { method: "PUT", json: { summary: $("#t-summary").value } }));
+    if (ok) { toast("Guardado"); renderTaste(); }
+  }));
+  $("#t-quiz")?.addEventListener("click", (e) => withBusy(e.currentTarget, async () => {
+    toast("La IA está leyendo sus recetas…", 6000);
+    const res = await safe(() => api("/api/taste/questions", { method: "POST" }));
+    if (res) tasteQuiz(res.questions);
+  }));
+}
+
+// Una pregunta por pantalla, con respuestas grandes para tocar; siempre se puede escribir otra o saltarla.
+function tasteQuiz(questions) {
+  const answers = questions.map(() => ({ picked: [], other: "" }));
+  let i = 0;
+  const m = formModal({ title: "Cómo comen ustedes", body: `<div id="quiz"></div>` });
+  const box = $("#quiz", m.el);
+  const save = () => {
+    answers[i].picked = $$(".quiz-opts input:checked", box).map((x) => x.value);
+    answers[i].other = $("#quiz-other", box).value.trim();
+  };
+  const draw = () => {
+    const q = questions[i], a = answers[i], last = i === questions.length - 1;
+    box.innerHTML = `
+      <p class="muted small" style="margin:0 0 .4rem">Pregunta ${i + 1} de ${questions.length}${q.multiple ? " · pueden elegir varias" : ""}</p>
+      <p class="quiz-q">${esc(q.text)}</p>
+      <div class="seg quiz-opts">${q.options.map((o) => `
+        <label><input type="${q.multiple ? "checkbox" : "radio"}" name="qo" value="${esc(o)}" ${a.picked.includes(o) ? "checked" : ""}><span>${esc(o)}</span></label>`).join("")}</div>
+      <label class="field" style="margin-top:.8rem">Otra respuesta<input id="quiz-other" value="${esc(a.other)}" maxlength="200" autocomplete="off"></label>
+      <div class="row spread" style="margin-top:1rem">
+        <button id="quiz-back" ${i ? "" : "disabled"}>${icon("back", 18)} Atrás</button>
+        <button class="primary" id="quiz-next">${last ? `${icon("check", 18)} Terminar` : `Siguiente ${icon("chevron", 18)}`}</button>
+      </div>`;
+    $("#quiz-back", box).onclick = () => { save(); i -= 1; draw(); };
+    $("#quiz-next", box).onclick = (e) => withBusy(e.currentTarget, async () => {
+      save();
+      if (!last) { i += 1; draw(); return; }
+      const payload = questions.map((q, n) => ({
+        question: q.text, answer: [...answers[n].picked, answers[n].other].filter(Boolean).join(", "),
+      }));
+      if (!payload.some((p) => p.answer)) return toast("Respondan al menos una pregunta");
+      toast("La IA está escribiendo el resumen…", 6000);
+      const ok = await safe(() => api("/api/taste/summary", { method: "POST", json: { answers: payload } }));
+      if (!ok) return;
+      m.close(true);
+      toast("Listo: así comen ustedes");
+      renderTaste();
+    });
+  };
+  draw();
 }
 
 // ------------------------------------------------------------------ premios de los niños (pestaña propia)

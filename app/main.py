@@ -17,8 +17,9 @@ import segno
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from . import agenda, ai, clock, gcal, household, inventory, prize_icons, rewards, services, storage, vision, voice
-from .auth import AuthMiddleware, check_pin, pin_enabled
+from . import agenda, ai, clock, gcal, household, inventory, prize_icons, rewards, services, storage, taste, vision, voice
+from . import auth
+from .auth import AuthMiddleware, pin_enabled
 from . import db
 from .db import get_session, init_db
 from .models import (
@@ -178,8 +179,10 @@ class VoiceIn(BaseModel):
     context: dict = Field(default_factory=dict)
 
 
-class PinIn(BaseModel):
-    pin: str
+class LoginIn(BaseModel):
+    pin: str = Field("", max_length=40)
+    user: str = Field("", max_length=80)
+    password: str = Field("", max_length=200)
 
 
 # servings = adultos; kids = niños (comen menos, según «Un niño come…» de la casa)
@@ -316,12 +319,17 @@ def meta(session: Session = SessionDep):
 
 @app.get("/api/auth")
 def auth_status():
-    return {"pin_required": pin_enabled()}
+    return {"pin_required": pin_enabled(), "mode": auth.mode()}
 
 
 @app.post("/api/login")
-def login(data: PinIn, request: Request):
-    return check_pin(data.pin, request)
+def login(data: LoginIn, request: Request):
+    return auth.login(request, pin=data.pin, user=data.user, password=data.password)
+
+
+@app.post("/api/logout")
+def logout(request: Request):
+    return auth.logout(request)
 
 
 @app.put("/api/settings")
@@ -393,6 +401,42 @@ def ai_test(data: AITestIn, session: Session = SessionDep):
     except ai.AIError as e:
         raise HTTPException(e.status, str(e)) from e
     return {"ok": True, "model": model, "seconds": round(time.time() - started, 1)}
+
+
+# ---------------------------------------------------------------- cómo comemos (para las ideas de la IA)
+
+@app.get("/api/taste")
+def get_taste(session: Session = SessionDep):
+    return taste.out(session)
+
+
+@app.put("/api/taste")
+def update_taste(data: taste.TasteIn, session: Session = SessionDep):
+    taste.update(session, data)
+    return taste.out(session)
+
+
+@app.post("/api/taste/questions")
+def taste_questions(session: Session = SessionDep):
+    """La IA lee las recetas de la casa y prepara el cuestionario de gustos."""
+    try:
+        return {"questions": taste.questions(session)}
+    except ai.AIError as e:
+        raise HTTPException(e.status, str(e)) from e
+
+
+class TasteAnswersIn(BaseModel):
+    answers: list[taste.Answer] = Field(max_length=15)
+
+
+@app.post("/api/taste/summary")
+def taste_summary(data: TasteAnswersIn, session: Session = SessionDep):
+    """Con las respuestas, la IA escribe «Así comen ustedes» (que después se puede corregir a mano)."""
+    try:
+        taste.summarize(session, data.answers)
+    except ai.AIError as e:
+        raise HTTPException(e.status, str(e)) from e
+    return taste.out(session)
 
 
 def _wake_word(session: Session) -> str:

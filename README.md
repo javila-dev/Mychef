@@ -96,6 +96,7 @@ modos, solo pide algo cuando falta más de una cuarta parte.
 | **Despensa** | Inventario con vencimientos, **mínimo** (si baja de ahí pasa sola a la lista) y equivalencias ⚖ ("1 taza de arroz = 200 g"). |
 | **Compras** | La lista completa de la semana, para copiar o pasar a la despensa. |
 | **Tareas** | Tareas del hogar: días de la semana, cada N días o un día del mes; persona fija, cualquiera o por turnos; hora del recordatorio en voz alta. También se agregan y cambian desde la tablet. |
+| **Cómo comemos** | Dónde viven y dónde compran, un **cuestionario hecho por la IA** (lee sus recetas y pregunta lo que falta) que termina en un resumen de «así comen ustedes» que se puede corregir a mano, y si las recetas nuevas de la IA van **a la fija** o a **explorar sabores nuevos**. |
 | **Casa** | Personas de la casa, cuántas tareas hizo cada uno, voz, «Oye casa», IA y **gastos del mes** según las facturas. |
 
 ## Cómo correrla
@@ -285,21 +286,33 @@ Requisitos del navegador para la voz:
 La frase se interpreta en el computador de la casa con reglas propias (rápido y gratis). Si alguien
 dice algo que no encaja y hay `OPENAI_API_KEY`, el modelo de OpenAI elegido la traduce a uno de los comandos conocidos.
 
-### PIN de la casa (recomendado si la app está en internet)
+### Entrar con usuario y contraseña (obligatorio si la app está en internet)
 
 ```bash
-export MYCHEF_PIN=2580          # el PIN que quieran
-export MYCHEF_SECRET=algo-largo-y-aleatorio
+export MYCHEF_USER=casa
+export MYCHEF_PASSWORD=una-clave-larga-de-verdad   # 12 caracteres o más
+export MYCHEF_SECRET=$(openssl rand -hex 32)        # firma las sesiones
 ```
 
-Cada dispositivo pide el PIN una sola vez y lo recuerda por un año. Tras 8 intentos fallidos se bloquea 5 minutos.
+Cada aparato (la tablet, los celulares) entra una sola vez y **la sesión no vence**: se renueva sola cada
+vez que el aparato usa la app, y reiniciar o actualizar el servidor no la cierra. Solo se cierra si cambian
+la contraseña o `MYCHEF_SECRET` (en todos los aparatos: por eso, una vez puestos, no los cambien sin
+necesidad), con *Administrar → Casa → Cerrar sesión aquí* (solo ese aparato) o si se borran los datos del
+navegador. Tras 8 intentos fallidos se bloquea 5 minutos. Queda cerrado todo lo
+que tiene datos (`/api/…`) y la documentación de la API (`/docs`); la pantalla en sí carga y pide entrar.
+
+Si la app está detrás de un proxy con https (Caddy, Traefik, nginx), la cookie de la sesión se marca como
+segura sola (por el encabezado `X-Forwarded-Proto`).
+
+Solo dentro de la red de la casa, en vez de usuario y contraseña puede usarse un PIN (`MYCHEF_PIN=2580`):
+es más cómodo en la tablet, pero un PIN corto no aguanta estar publicado en internet.
 
 ### Inteligencia artificial: Gemini para fotos, OpenAI para texto (opcional)
 
 | Para qué | Proveedor | Clave |
 |---|---|---|
 | **Fotos**: facturas, nevera y alacena (con los números encima), recetas en foto | Google **Gemini** | `GEMINI_API_KEY` (o `GOOGLE_API_KEY`) |
-| **Texto y voz**: recetas escritas y frases que la tablet no entendió | **OpenAI** | `OPENAI_API_KEY` |
+| **Texto y voz**: recetas escritas, frases que la tablet no entendió y el cuestionario de «Cómo comemos» | **OpenAI** | `OPENAI_API_KEY` |
 
 ```bash
 export GEMINI_API_KEY=...      # https://aistudio.google.com/apikey

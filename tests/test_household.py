@@ -127,12 +127,56 @@ def test_today_summary(client):
 def test_pin_protects_api(client, monkeypatch):
     monkeypatch.setenv("MYCHEF_PIN", "2580")
     auth._fails.clear()
-    assert client.get("/api/auth").json() == {"pin_required": True}
+    assert client.get("/api/auth").json() == {"pin_required": True, "mode": "pin"}
     assert client.get("/api/today").status_code == 401
     assert client.get("/").status_code == 200  # la pantalla carga y pide el PIN
     assert client.post("/api/login", json={"pin": "1111"}).status_code == 401
     assert client.post("/api/login", json={"pin": "2580"}).status_code == 200
     assert client.get("/api/today").status_code == 200  # la cookie queda guardada
+
+
+def test_user_and_password(client, monkeypatch):
+    monkeypatch.setenv("MYCHEF_USER", "Casa")
+    monkeypatch.setenv("MYCHEF_PASSWORD", "una clave larga")
+    monkeypatch.setenv("MYCHEF_PIN", "2580")  # con usuario y contraseña, el PIN ya no sirve
+    auth._fails.clear()
+    assert client.get("/api/auth").json() == {"pin_required": True, "mode": "password"}
+    assert client.get("/api/today").status_code == 401
+    for path in ("/docs", "/openapi.json"):
+        assert client.get(path).status_code == 401  # la documentación de la API también queda cerrada
+    assert client.get("/").status_code == 200 and client.get("/static/hub.js").status_code == 200
+    assert client.post("/api/login", json={"pin": "2580"}).status_code == 401
+    r = client.post("/api/login", json={"user": "casa", "password": "otra"})
+    assert r.status_code == 401 and r.json()["detail"] == "Usuario o contraseña incorrectos"
+    # Detrás del proxy con https la cookie solo viaja cifrada
+    r = client.post("/api/login", json={"user": "casa", "password": "una clave larga"},
+                    headers={"x-forwarded-proto": "https"})
+    assert r.status_code == 200 and "secure" in r.headers["set-cookie"].lower()
+    client.cookies.clear()
+    r = client.post("/api/login", json={"user": " casa ", "password": "una clave larga"})
+    assert r.status_code == 200 and "secure" not in r.headers["set-cookie"].lower()
+    r = client.get("/api/today")
+    assert r.status_code == 200
+    # Cada uso renueva la sesión por 400 días: nunca vence mientras el aparato se use
+    assert "max-age=34560000" in r.headers["set-cookie"].lower()
+
+    # Cambiar la contraseña cierra la sesión en todos los aparatos
+    monkeypatch.setenv("MYCHEF_PASSWORD", "la nueva")
+    assert client.get("/api/today").status_code == 401
+    client.post("/api/login", json={"user": "casa", "password": "la nueva"})
+    assert client.post("/api/logout").status_code == 200
+    assert client.get("/api/today").status_code == 401
+
+
+def test_too_many_tries_lock(client, monkeypatch):
+    monkeypatch.setenv("MYCHEF_USER", "casa")
+    monkeypatch.setenv("MYCHEF_PASSWORD", "una clave larga")
+    auth._fails.clear()
+    for _ in range(auth.MAX_FAILS):
+        client.post("/api/login", json={"user": "casa", "password": "mal"})
+    r = client.post("/api/login", json={"user": "casa", "password": "una clave larga"})
+    assert r.status_code == 429  # ni con la clave buena, hasta que pasen 5 minutos
+    auth._fails.clear()
 
 
 def test_old_database_gets_new_columns(tmp_path):

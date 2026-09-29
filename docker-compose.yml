@@ -8,7 +8,10 @@ services:
       # Los modelos se eligen en Ajustes → Casa y tareas.
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      # Opcional: PIN de la casa (recomendado si la app queda publicada en internet)
+      # Entrar con usuario y contraseña (obligatorio si la app queda publicada en internet)
+      - MYCHEF_USER=${MYCHEF_USER:-}
+      - MYCHEF_PASSWORD=${MYCHEF_PASSWORD:-}
+      # O, solo dentro de la red de la casa, un PIN
       - MYCHEF_PIN=${MYCHEF_PIN:-}
       - MYCHEF_SECRET=${MYCHEF_SECRET:-}
       # Opcional: usar PostgreSQL en vez del archivo SQLite de ./data

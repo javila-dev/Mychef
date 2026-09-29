@@ -326,6 +326,10 @@ dialog::backdrop { background: rgba(22, 32, 24, .45); animation: fade-in .22s va
 .when-btn .remind { display: inline-flex; align-items: center; gap: .2rem; color: var(--muted); font-size: .9em; }
 [data-sch][hidden] { display: none !important; }
 
+/* Cuestionario de «Cómo comemos» (Administrar): una pregunta por pantalla, respuestas grandes */
+.quiz-q { margin: 0 0 .6rem; font-size: 1.25rem; font-weight: 600; }
+.quiz-opts label > span { padding: .75rem 1.2rem; font-size: 1.05rem; }
+
 /* Modelos de IA (Administrar → Casa y tareas) */
 .ai-row + .ai-row { border-top: 1px dashed var(--line); padding-top: .8rem; }
 .ok-text { color: var(--green-ink); font-weight: 500; }
@@ -546,3 +550,11 @@ dialog::backdrop { background: rgba(22, 32, 24, .45); animation: fade-in .22s va
 .quick-stars button { padding: .4rem .8rem; border-radius: 999px; }
 .quick-stars button[aria-pressed="true"] { border-color: var(--green); background: var(--green-mist); color: var(--green-ink); }
 
+
+/* Entrar con usuario y contraseña */
+.login-card { display: grid; gap: .8rem; text-align: left; }
+.login-card .pin-emoji, .login-card h2 { text-align: center; }
+.login-card h2 { margin: 0 0 .4rem; }
+.login-card .pin-error { min-height: 1.3rem; }
+.login-card button { justify-content: center; display: flex; align-items: center; gap: .4rem; }
+.login-card p { margin: 0; text-align: center; }
