@@ -846,8 +846,8 @@ async function renderHouse() {
       <section class="card stack" id="ai-card">
         <h2>Inteligencia artificial</h2>
         ${aiRow("photo", "Fotos", "Facturas, nevera, alacena y recetas en foto. Siempre con Gemini.")}
-        ${aiRow("text", "Voz", "Frases que la tablet no entendió y la agenda por voz. Mejor un modelo rápido (gemini-2.5-flash-lite).")}
-        ${aiRow("menu", "Menú y recetas", "Ideas del menú del domingo, el cuestionario de «Cómo comemos» y recetas escritas. Mejor calidad (gemini-2.5-flash).")}
+        ${aiRow("text", "Voz", "Frases que la tablet no entendió y la agenda por voz. Mejor un modelo rápido (gemini-3.5-flash-lite).")}
+        ${aiRow("menu", "Menú y recetas", "Ideas del menú del domingo, el cuestionario de «Cómo comemos» y recetas escritas. Mejor calidad (gemini-3.8-flash).")}
         <p class="muted small" style="margin:0">Con la clave de Gemini (<code>GEMINI_API_KEY</code>) alcanza para todo. Si prefieren OpenAI para el texto,
           elijan un modelo «gpt-…» y pongan <code>OPENAI_API_KEY</code>. Las claves se ponen en el computador de la casa (variables de entorno), no aquí.</p>
       </section>

@@ -35,11 +35,11 @@ KEY_ENV = {"Gemini": "GEMINI_API_KEY", "OpenAI": "OPENAI_API_KEY"}
 # Modelos por defecto de cada uso, según el proveedor (se pueden cambiar con MYCHEF_*_MODEL)
 ROLES = {
     "photo": {"setting": "ai_photo_model", "env": "MYCHEF_PHOTO_MODEL",
-              "Gemini": "gemini-2.5-flash", "OpenAI": None},
+              "Gemini": "gemini-3.8-flash", "OpenAI": None},
     "text": {"setting": "ai_text_model", "env": "MYCHEF_TEXT_MODEL",
-             "Gemini": "gemini-2.5-flash-lite", "OpenAI": "gpt-5-mini"},
+             "Gemini": "gemini-3.5-flash-lite", "OpenAI": "gpt-5-mini"},
     "menu": {"setting": "ai_menu_model", "env": "MYCHEF_MENU_MODEL",
-             "Gemini": "gemini-2.5-flash", "OpenAI": "gpt-5-mini"},
+             "Gemini": "gemini-3.8-flash", "OpenAI": "gpt-5-mini"},
 }
 
 

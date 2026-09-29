@@ -290,8 +290,8 @@ def test_ai_models_are_chosen_in_settings(client, monkeypatch):
     meta = client.get("/api/meta").json()["ai"]
     assert meta["photo"]["provider"] == "Gemini" and meta["photo"]["configured"] is False
     # Por defecto todo con Gemini: una sola clave; la voz con el modelo rápido
-    assert (meta["text"]["provider"], meta["text"]["model"]) == ("Gemini", "gemini-2.5-flash-lite")
-    assert (meta["menu"]["provider"], meta["menu"]["model"]) == ("Gemini", "gemini-2.5-flash")
+    assert (meta["text"]["provider"], meta["text"]["model"]) == ("Gemini", "gemini-3.5-flash-lite")
+    assert (meta["menu"]["provider"], meta["menu"]["model"]) == ("Gemini", "gemini-3.8-flash")
     assert meta["text"]["key_env"] == "GEMINI_API_KEY"
     # Si la casa solo tiene la clave de OpenAI, el texto sigue con OpenAI
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")

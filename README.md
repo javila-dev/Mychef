@@ -327,9 +327,9 @@ importa activen la facturación (para una casa son centavos al mes).
 
 | Para qué | Modelo por defecto | Variable |
 |---|---|---|
-| **Fotos**: facturas, nevera y alacena (con los números encima), recetas en foto | `gemini-2.5-flash` (siempre Gemini) | `MYCHEF_PHOTO_MODEL` |
-| **Voz**: frases que la tablet no entendió y la agenda por voz (tiene que ser rápido) | `gemini-2.5-flash-lite` | `MYCHEF_TEXT_MODEL` |
-| **Menú y recetas**: ideas del menú del domingo, cuestionario de «Cómo comemos», recetas escritas | `gemini-2.5-flash` | `MYCHEF_MENU_MODEL` |
+| **Fotos**: facturas, nevera y alacena (con los números encima), recetas en foto | `gemini-3.8-flash` (siempre Gemini) | `MYCHEF_PHOTO_MODEL` |
+| **Voz**: frases que la tablet no entendió y la agenda por voz (tiene que ser rápido) | `gemini-3.5-flash-lite` | `MYCHEF_TEXT_MODEL` |
+| **Menú y recetas**: ideas del menú del domingo, cuestionario de «Cómo comemos», recetas escritas | `gemini-3.8-flash` | `MYCHEF_MENU_MODEL` |
 
 ```bash
 export GEMINI_API_KEY=...      # https://aistudio.google.com/apikey
