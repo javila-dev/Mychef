@@ -1264,3 +1264,36 @@ button.dish:hover { box-shadow: inset 0 0 0 2px var(--green); }
 @media (prefers-reduced-motion: reduce) {
   .claim-btn, .cel-star, .cel-star .plus, .cel-badge { animation: none; }
 }
+
+/* Sobras: lo que quedó hecho en la nevera o el congelador (tono frío, como los congelados) */
+.meal-row .m-left, .src.sobra {
+  flex: none; display: inline-flex; align-items: center; gap: .3rem; font-size: .88rem; font-weight: 500;
+  padding: .2rem .65rem; border-radius: 999px; background: var(--tint-teal); color: var(--tint-teal-ink); white-space: nowrap;
+}
+.src.sobra { font-size: .78rem; font-weight: 600; padding: .15rem .6rem; gap: .25rem; }
+.plate.sobra { background: var(--tint-teal) !important; min-height: 64px; }
+.plate.sobra:hover { box-shadow: inset 0 0 0 2px var(--tint-teal-ink); }
+.plate .p-state.sobra, .entry-state.sobra { color: var(--tint-teal-ink); }
+.plate.add.slim { min-height: 52px; }
+.dish .d-left { width: 100%; display: flex; align-items: center; gap: .35rem; margin-top: .3rem; padding-top: .45rem; border-top: 1px dashed var(--line-strong); font-size: .95rem; color: var(--tint-teal-ink); }
+.dish .d-left small { color: var(--muted); }
+.entry-left { width: 100%; justify-content: center; display: flex !important; align-items: center; gap: .5rem; margin-top: .6rem; }
+.w-links { display: inline-flex; align-items: center; gap: .1rem; flex: none; }
+.inv-seen.warn { background: var(--honey-fill); color: var(--ink); }
+.lf-hint { margin: .5rem 0 0; font-size: .95rem; text-align: center; }
+.sobra-note h3 { color: var(--tint-teal-ink); }
+.sobra-note b { font-weight: 600; }
+
+.left-sheet { padding: .3rem 1rem; margin-bottom: 1rem; }
+.left-row {
+  all: unset; box-sizing: border-box; cursor: pointer; width: 100%; display: flex; align-items: center; gap: 1rem;
+  padding: .85rem .3rem; min-height: 76px;
+}
+.left-row + .left-row { border-top: 1px solid var(--line); }
+.left-row:hover { background: var(--green-mist); }
+.left-row:focus-visible { outline: 2px solid var(--green); border-radius: var(--r-sm); }
+.lr-ic { flex: none; width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; background: var(--tint-teal); color: var(--tint-teal-ink); }
+.lr-ic.nevera { background: var(--tint-sky); color: var(--tint-sky-ink); }
+.lr-txt { flex: 1; min-width: 0; display: grid; gap: .1rem; }
+.lr-txt b { font-size: 1.2rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lr-txt small { color: var(--muted); font-size: .95rem; }

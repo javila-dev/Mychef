@@ -142,6 +142,35 @@ class CookLog(SQLModel, table=True):
     kids: int = 0
 
 
+LEFTOVER_PLACES = ["nevera", "congelador"]
+
+
+class Leftover(SQLModel, table=True):
+    """Comida ya hecha que quedó guardada: los frijoles del congelador, la bolognesa, el arroz de pollo.
+    Se come por porciones y no gasta la despensa ni pide compras."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    recipe_id: Optional[int] = Field(default=None, foreign_key="recipe.id")  # de qué receta salió, si se sabe
+    portions: float = 0  # las que quedan (0 = ya no hay; la fila se queda para el historial del menú)
+    place: str = "nevera"  # nevera | congelador
+    made_on: dt.date = Field(default_factory=clock.today)
+    created_at: dt.datetime = Field(default_factory=utcnow)
+
+
+class MenuLeftover(SQLModel, table=True):
+    """Sobras en una comida del menú: solas (la comida completa) o al lado de una receta."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    day: dt.date = Field(index=True)
+    meal_type: str
+    leftover_id: int = Field(foreign_key="leftover.id", index=True)
+    portions: float  # las que se van a comer (adultos + niños según «Un niño come…»)
+    eaten: bool = False
+
+    leftover: Leftover = Relationship()
+
+
 class Setting(SQLModel, table=True):
     key: str = Field(primary_key=True)
     value: str

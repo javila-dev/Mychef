@@ -18,7 +18,7 @@ import segno
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from . import agenda, ai, catalog, clock, gcal, household, inventory, ideas, planner, prize_icons, rewards, services, storage, taste, vision, voice
+from . import agenda, ai, catalog, clock, gcal, household, inventory, ideas, leftovers, planner, prize_icons, rewards, services, storage, taste, vision, voice
 from . import auth
 from .auth import AuthMiddleware, pin_enabled
 from . import db
@@ -27,15 +27,18 @@ from .models import (
     DISH_TYPES,
     CHORE_EMOJIS,
     INGREDIENT_CATEGORIES,
+    LEFTOVER_PLACES,
     MEAL_TYPES,
     Chore,
     ChoreLog,
     Event,
     FamilyPhoto,
     Ingredient,
+    Leftover,
     Member,
     ShoppingExtra,
     MenuEntry,
+    MenuLeftover,
     PantryItem,
     Prize,
     Recipe,
@@ -604,6 +607,9 @@ def delete_recipe(recipe_id: int, session: Session = SessionDep):
     recipe = _get_recipe(session, recipe_id)
     for e in session.exec(select(MenuEntry).where(MenuEntry.recipe_id == recipe_id)):
         session.delete(e)
+    for left in session.exec(select(Leftover).where(Leftover.recipe_id == recipe_id)):
+        left.recipe_id = None  # las sobras siguen en la nevera aunque se borre la receta
+        session.add(left)
     session.delete(recipe)
     session.commit()
 
@@ -906,8 +912,17 @@ class WeekEntryIn(BaseModel):
     kids: int | None = Field(None, ge=0)
 
 
+class WeekLeftoverIn(BaseModel):
+    day: dt.date
+    meal_type: str
+    leftover_id: int
+    servings: int | None = Field(None, ge=0)
+    kids: int | None = Field(None, ge=0)
+
+
 class WeekIn(BaseModel):
     entries: list[WeekEntryIn] = Field(max_length=4 * 14 * 3)
+    leftovers: list[WeekLeftoverIn] = Field(default_factory=list, max_length=4 * 14 * 3)  # sobras en alguna comida
     # Comidas que se rehacen: lo que tenían sin cocinar se quita antes de guardar
     replace: list[PlanSlot] = Field(default_factory=list, max_length=4 * 14)
 
@@ -931,7 +946,8 @@ def _new_trial_recipe(session: Session, data: RecipeIn) -> Recipe:
 @app.post("/api/menu/week", status_code=201)
 def save_menu_week(data: WeekIn, session: Session = SessionDep):
     """Guarda de una vez la semana que aprobó la familia."""
-    _validate_meals([e.meal_type for e in data.entries] + [s.meal for s in data.replace])
+    _validate_meals([e.meal_type for e in data.entries] + [s.meal for s in data.replace]
+                    + [x.meal_type for x in data.leftovers])
     items = []
     for e in data.entries:
         if e.new_recipe is not None:
@@ -943,7 +959,13 @@ def save_menu_week(data: WeekIn, session: Session = SessionDep):
         adults, kids = _servings(session, e.servings, e.kids, e.meal_type)
         items.append({"day": e.day, "meal_type": e.meal_type, "recipe_id": recipe_id,
                       "servings": adults, "kids": kids})
-    created = planner.save_week(session, items, [(s.day, s.meal) for s in data.replace])
+    plates = []
+    for x in data.leftovers:
+        _get_leftover(session, x.leftover_id)
+        adults, kids = _servings(session, x.servings, x.kids, x.meal_type)
+        plates.append({"day": x.day, "meal_type": x.meal_type, "leftover_id": x.leftover_id,
+                       "portions": services.portions(session, adults, kids)})
+    created = planner.save_week(session, items, [(s.day, s.meal) for s in data.replace], plates)
     session.commit()
     for e in created:
         session.refresh(e)
@@ -959,8 +981,156 @@ def cook_menu(entry_id: int, session: Session = SessionDep):
         raise HTTPException(409, "Ya se marcó como cocinado")
     changes = services.cook(session, entry.recipe, entry.servings, entry.day, kids=entry.kids or 0)
     entry.cooked = True
+    eaten = leftovers.eat_with_meal(session, entry.day, entry.meal_type)  # las sobras que iban al lado
     session.commit()
-    return {"pantry_changes": changes}
+    return {"pantry_changes": changes, "leftovers_eaten": eaten}
+
+
+# ---------------------------------------------------------------- sobras
+
+class LeftoverIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    portions: float = Field(gt=0, le=200)
+    place: str = "nevera"
+    recipe_id: int | None = None
+    made_on: dt.date | None = None
+
+
+class LeftoverUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=80)
+    portions: float | None = Field(None, ge=0, le=200)
+    place: str | None = None
+
+
+class MenuLeftoverIn(BaseModel):
+    day: dt.date
+    meal_type: str
+    leftover_id: int
+    servings: int | None = Field(None, ge=0)  # adultos
+    kids: int | None = Field(None, ge=0)
+
+
+def _get_leftover(session: Session, leftover_id: int) -> Leftover:
+    left = session.get(Leftover, leftover_id)
+    if not left:
+        raise HTTPException(404, "Esas sobras no están")
+    return left
+
+
+def _get_plate(session: Session, plate_id: int) -> MenuLeftover:
+    plate = session.get(MenuLeftover, plate_id)
+    if not plate:
+        raise HTTPException(404, "No está en el menú")
+    return plate
+
+
+def _check_place(place: str) -> str:
+    if not leftovers.valid_place(place):
+        raise HTTPException(422, f"¿Dónde están? {' o '.join(LEFTOVER_PLACES)}")
+    return place
+
+
+@app.get("/api/leftovers")
+def list_leftovers(session: Session = SessionDep):
+    return leftovers.available(session)
+
+
+@app.post("/api/leftovers", status_code=201)
+def add_leftover(data: LeftoverIn, session: Session = SessionDep):
+    """«Guardé sobras»: el tarro de frijoles que va para el congelador."""
+    if data.recipe_id is not None:
+        _get_recipe(session, data.recipe_id)
+    name = data.name.strip()
+    left = Leftover(name=name[0].upper() + name[1:], portions=data.portions, place=_check_place(data.place),
+                    recipe_id=data.recipe_id, made_on=data.made_on or clock.today())
+    session.add(left)
+    session.commit()
+    session.refresh(left)
+    return leftovers.leftover_out(left)
+
+
+@app.patch("/api/leftovers/{leftover_id}")
+def update_leftover(leftover_id: int, data: LeftoverUpdate, session: Session = SessionDep):
+    left = _get_leftover(session, leftover_id)
+    if data.name is not None:
+        left.name = data.name.strip()
+    if data.place is not None:
+        left.place = _check_place(data.place)
+    if data.portions is not None:
+        if data.portions <= 0:
+            leftovers.finish(session, left)
+        else:
+            left.portions = data.portions
+    session.add(left)
+    session.commit()
+    session.refresh(left)
+    return leftovers.leftover_out(left, in_menu=leftovers.planned(session).get(left.id, 0.0))
+
+
+@app.delete("/api/leftovers/{leftover_id}")
+def finish_leftover(leftover_id: int, session: Session = SessionDep):
+    """Se acabaron o se botaron (no se borra: el menú de otros días las sigue nombrando)."""
+    removed = leftovers.finish(session, _get_leftover(session, leftover_id))
+    session.commit()
+    return {"removed_from_menu": removed}
+
+
+@app.get("/api/menu/leftovers")
+def get_menu_leftovers(start: dt.date, days: int = 7, session: Session = SessionDep):
+    today = clock.today()
+    return [leftovers.plate_out(p, today) for p in leftovers.plates(session, start, start + dt.timedelta(days=days - 1))]
+
+
+@app.post("/api/menu/leftovers", status_code=201)
+def add_menu_leftover(data: MenuLeftoverIn, session: Session = SessionDep):
+    """Sobras en una comida: solas o al lado de lo que se cocina."""
+    _validate_meals([data.meal_type])
+    left = _get_leftover(session, data.leftover_id)
+    if left.portions <= 0:
+        raise HTTPException(409, "Esas sobras ya se acabaron")
+    same = session.exec(select(MenuLeftover).where(
+        MenuLeftover.day == data.day, MenuLeftover.meal_type == data.meal_type,
+        MenuLeftover.leftover_id == left.id, MenuLeftover.eaten == False)).first()  # noqa: E712
+    if same:
+        return leftovers.plate_out(same)
+    adults, kids = _servings(session, data.servings, data.kids, data.meal_type)
+    plate = MenuLeftover(day=data.day, meal_type=data.meal_type, leftover_id=left.id,
+                         portions=services.portions(session, adults, kids))
+    session.add(plate)
+    session.commit()
+    session.refresh(plate)
+    return leftovers.plate_out(plate)
+
+
+@app.delete("/api/menu/leftovers/{plate_id}", status_code=204)
+def delete_menu_leftover(plate_id: int, session: Session = SessionDep):
+    plate = session.get(MenuLeftover, plate_id)
+    if plate:
+        if plate.eaten:
+            leftovers.uneat(session, plate)  # vuelven a estar guardadas
+        session.delete(plate)
+        session.commit()
+
+
+@app.post("/api/menu/leftovers/{plate_id}/eat")
+def eat_menu_leftover(plate_id: int, session: Session = SessionDep):
+    plate = _get_plate(session, plate_id)
+    if plate.eaten:
+        raise HTTPException(409, "Ya se marcó que se comieron")
+    leftovers.eat(session, plate)
+    session.commit()
+    session.refresh(plate)
+    return leftovers.plate_out(plate)
+
+
+@app.post("/api/menu/leftovers/{plate_id}/uneat")
+def uneat_menu_leftover(plate_id: int, session: Session = SessionDep):
+    plate = _get_plate(session, plate_id)
+    if plate.eaten:
+        leftovers.uneat(session, plate)
+        session.commit()
+        session.refresh(plate)
+    return leftovers.plate_out(plate)
 
 
 @app.get("/api/shopping-list")

@@ -7,7 +7,7 @@ import datetime as dt
 
 from sqlmodel import Session, select
 
-from . import clock, services
+from . import clock, leftovers, services
 from .models import (
     Chore,
     ChoreLog,
@@ -342,6 +342,10 @@ def today_summary(session: Session, today: dt.date | None = None) -> dict:
         "date": today.isoformat(),
         "setup": counts,
         "meals": meals,
+        # Sobras de hoy en el menú, y las guardadas (las de la nevera con días, al «ojo con esto»)
+        "leftover_meals": [leftovers.plate_out(p, today) for p in sorted(
+            leftovers.plates(session, today, today), key=lambda p: services.MEAL_ORDER.get(p.meal_type, 9))],
+        "leftovers": leftovers.available(session, today),
         "expiring": expiring,
         "chores": chores,
         "shopping_count": len(shopping),

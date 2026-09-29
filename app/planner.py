@@ -20,8 +20,8 @@ from dataclasses import dataclass, field
 
 from sqlmodel import Session, select
 
-from . import services
-from .models import MEAL_TYPES, CookLog, MenuEntry, Recipe
+from . import leftovers, services
+from .models import MEAL_TYPES, CookLog, MenuEntry, MenuLeftover, Recipe
 from .units import to_grams
 
 RECENT_DAYS = 7  # «la semana inmediatamente anterior»
@@ -186,9 +186,12 @@ def plan_week(
     week = Week()
 
     existing: dict[tuple[dt.date, str], list[MenuEntry]] = {}
+    existing_left: dict[tuple[dt.date, str], list[MenuLeftover]] = {}
     if keep_existing:
         for e in session.exec(select(MenuEntry).where(MenuEntry.day >= start, MenuEntry.day <= end)):
             existing.setdefault((e.day, e.meal_type), []).append(e)
+        for p in leftovers.plates(session, start, end):
+            existing_left.setdefault((p.day, p.meal_type), []).append(p)
     # Lo que ya está en el menú cuenta primero: gasta de la despensa y no se repite.
     for (day, meal), entries in existing.items():
         for e in entries:
@@ -200,10 +203,11 @@ def plan_week(
     for day, meal in slots:
         adults, kids = people.get((day, meal)) or services.meal_diners(session, meal)
         slot = {"day": day.isoformat(), "meal": meal, "adults": adults, "kids": kids}
-        if (day, meal) in existing:
+        if (day, meal) in existing or (day, meal) in existing_left:
             out.append({**slot, "fixed": True, "entries": [
                 {"id": e.id, "recipe": services.recipe_summary(e.recipe), "cooked": e.cooked}
-                for e in existing[(day, meal)]]})
+                for e in existing.get((day, meal), [])],
+                "leftovers": [p.leftover.name for p in existing_left.get((day, meal), [])]})
             continue
         eaten = services.portions(session, adults, kids)
         mains = rank(recipes, day, meal, "main", eaten, pantry, week, recent, expiring)
@@ -222,8 +226,11 @@ def plan_week(
         out.append(slot)
 
     _rank_for_ai(out)
+    # Las sobras que hay, para ponerlas en alguna comida (las de las comidas que se rehacen quedan libres)
+    redo = set() if keep_existing else set(slots)
     return {"start": start.isoformat(), "slots": out,
-            "recent": sorted({services.recipe_summary(r)["name"] for r in recipes if r.id in recent})}
+            "recent": sorted({services.recipe_summary(r)["name"] for r in recipes if r.id in recent}),
+            "leftovers": leftovers.available(session, exclude=redo)}
 
 
 def _rank_for_ai(slots: list[dict]) -> None:
@@ -239,8 +246,14 @@ def _rank_for_ai(slots: list[dict]) -> None:
         s["ai_rank"] = n
 
 
-def save_week(session: Session, entries: list[dict], replace: list[tuple[dt.date, str]]) -> list[MenuEntry]:
-    """Guarda lo que la familia aprobó. En las comidas de `replace` se quita lo que había sin cocinar."""
+def save_week(session: Session, entries: list[dict], replace: list[tuple[dt.date, str]],
+              plates: list[dict] | None = None) -> list[MenuEntry]:
+    """Guarda lo que la familia aprobó. En las comidas de `replace` se quita lo que había sin cocinar.
+    `plates` = sobras que van en alguna comida (solas o al lado de la receta)."""
+    leftovers.clear_slots(session, set(replace))
+    for item in plates or []:
+        session.add(MenuLeftover(day=item["day"], meal_type=item["meal_type"],
+                                 leftover_id=item["leftover_id"], portions=item["portions"]))
     for day, meal in set(replace):
         for e in session.exec(select(MenuEntry).where(MenuEntry.day == day, MenuEntry.meal_type == meal)):
             if not e.cooked:

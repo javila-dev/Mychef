@@ -460,6 +460,7 @@ dialog::backdrop { background: rgba(22, 32, 24, .45); animation: fade-in .22s va
 .g-panaderia  { --g-bg: var(--tint-wheat); --g-ink: var(--tint-wheat-ink); }
 .g-despensa   { --g-bg: var(--tint-lilac); --g-ink: var(--tint-lilac-ink); }
 .g-congelados { --g-bg: var(--tint-teal); --g-ink: var(--tint-teal-ink); }
+.g-sobras     { --g-bg: var(--tint-teal); --g-ink: var(--tint-teal-ink); }
 .g-bebidas    { --g-bg: var(--tint-indigo); --g-ink: var(--tint-indigo-ink); }
 .g-aseo       { --g-bg: var(--tint-stone); --g-ink: var(--tint-stone-ink); }
 .g-otros      { --g-bg: var(--tint-stone); --g-ink: var(--tint-stone-ink); }
