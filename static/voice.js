@@ -30,10 +30,17 @@ export function spanishVoices() {
   return voices.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 }
 // Cuando el navegador termina de cargar la lista de voces (llega tarde en Chrome).
+// En Android a veces no llega ese aviso: se vuelve a preguntar unos segundos antes de rendirse.
 export function onVoicesReady(fn) {
   if (!window.speechSynthesis) return fn([]);
-  if (spanishVoices().length) fn(spanishVoices());
-  window.speechSynthesis.addEventListener?.("voiceschanged", () => fn(spanishVoices()));
+  let tries = 0;
+  const check = () => {
+    const list = spanishVoices();
+    if (list.length || ++tries >= 12) { clearInterval(timer); fn(list); }
+  };
+  const timer = setInterval(check, 250);
+  window.speechSynthesis.addEventListener?.("voiceschanged", () => { clearInterval(timer); fn(spanishVoices()); });
+  check();
 }
 
 let voice = null;
@@ -47,11 +54,20 @@ if (window.speechSynthesis) {
   window.speechSynthesis.addEventListener?.("voiceschanged", pickVoice);
 }
 
+// Fully Kiosk Browser no le pasa las voces a la página, pero trae su propia forma de hablar
+// (en Fully: Advanced Web Settings → Enable JavaScript Interface).
+const fully = typeof window.fully?.textToSpeech === "function" ? window.fully : null;
+
 export function speak(text, { force = false } = {}) {
   return new Promise((resolve) => {
-    if (!text || !window.speechSynthesis) return resolve();
+    if (!text) return resolve();
     const prefs = getVoicePrefs();
     if (!prefs.on && !force) return resolve();
+    if (fully && !voice) {
+      fully.textToSpeech(text, LANG);
+      return setTimeout(resolve, Math.min(20000, 1500 + text.length * 90));
+    }
+    if (!window.speechSynthesis) return resolve();
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.lang = voice?.lang ?? LANG;
@@ -62,7 +78,7 @@ export function speak(text, { force = false } = {}) {
     setTimeout(resolve, Math.min(20000, (1500 + text.length * 90) / (prefs.rate || 1))); // por si el navegador no avisa
   });
 }
-export function stopSpeaking() { window.speechSynthesis?.cancel(); }
+export function stopSpeaking() { window.speechSynthesis?.cancel(); fully?.stopTextToSpeech?.(); }
 
 // ---------------------------------------------------------------- escuchar una frase
 

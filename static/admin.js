@@ -920,7 +920,7 @@ async function renderHouse() {
     sel.innerHTML = voices.length
       ? `<option value="">Automática (${esc(voices[0].name)})</option>` + voices.map((v) => `
           <option value="${esc(v.voiceURI)}" ${v.voiceURI === cur ? "selected" : ""}>${esc(v.name)} · ${esc(v.lang)}${v.localService ? "" : " · con internet"}</option>`).join("")
-      : `<option value="">Este navegador no tiene voces en español</option>`;
+      : `<option value="">La del aparato (este navegador no deja elegir)</option>`;
   });
   $("#v-on").onchange = (e) => { setVoicePrefs({ on: e.target.checked }); toast(e.target.checked ? "Va a contestar en voz alta" : "Solo va a contestar por escrito"); };
   $("#v-voice").onchange = (e) => { setVoicePrefs({ uri: e.target.value }); speak("Hola, así sueno yo.", { force: true }); };
