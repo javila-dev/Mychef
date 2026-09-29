@@ -57,7 +57,7 @@ def save(session: Session, **changes) -> dict:
 
 
 def out(session: Session) -> dict:
-    return {**get(session), "ai_ready": ai.configured("text"), "stores_options": STORES,
+    return {**get(session), "ai_ready": ai.ready(session, "menu"), "stores_options": STORES,
             "adventure_options": [{"key": k, "text": t} for k, t in ADVENTURE.items()]}
 
 
@@ -79,7 +79,8 @@ def _people(session: Session) -> str:
 
 def _recipes(session: Session) -> str:
     lines = []
-    for r in session.exec(select(Recipe).order_by(Recipe.favorite.desc(), Recipe.name)).all()[:MAX_RECIPES]:
+    house = select(Recipe).where(Recipe.trial == False).order_by(Recipe.favorite.desc(), Recipe.name)  # noqa: E712
+    for r in session.exec(house).all()[:MAX_RECIPES]:
         main = [ri.ingredient.name for ri in r.ingredients if not ri.ingredient.is_staple][:8]
         fav = " (favorita)" if r.favorite else ""
         lines.append(f"- {r.name}{fav} [{r.meal_types}; {r.dish_type}]: {', '.join(main)}")
@@ -129,7 +130,7 @@ picante, carnes y pescados que prefieren, cuánto tiempo hay para cocinar entre 
 quieren en la cena.
 - Cada pregunta con 2 a 6 respuestas cortas para tocar; la persona también puede escribir otra.
 - Palabras sencillas, sin tecnicismos; trata a la familia de "ustedes"."""
-    result = ai.openai_parse(ai.model_for(session, "text"), prompt, TasteQuestions)
+    result = ai.text_parse(ai.model_for(session, "menu"), prompt, TasteQuestions)
     seen, qs = set(), []
     for q in result.questions:
         text = _clean(q.text, 160)
@@ -166,7 +167,7 @@ Escribe un resumen de cómo comen, para usarlo después al proponerles recetas. 
 cortas que empiezan con "- ", una idea por línea: lo que no comen o les cae mal (primero), lo que les \
 gusta, desayunos, cenas, niños, tiempo y utensilios. Solo lo que dijeron o se ve en las recetas; no \
 inventes. Español sencillo."""
-    result = ai.openai_parse(ai.model_for(session, "text"), prompt, TasteSummary)
+    result = ai.text_parse(ai.model_for(session, "menu"), prompt, TasteSummary)
     summary = _summary_text(result.summary)
     if not summary:
         raise ai.AIError("La IA no devolvió el resumen; intenten de nuevo.", 422)

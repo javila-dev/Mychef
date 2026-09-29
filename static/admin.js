@@ -137,6 +137,7 @@ async function renderRecipes(filters = {}) {
           <span class="muted small">${r.servings} porc.</span></div>
         <div class="row small">${r.meal_types.map((m) => `<span class="badge accent">${esc(m)}</span>`).join("")}
           <span class="badge">${esc(r.dish_type)}</span>
+          ${r.trial ? `<span class="badge warn" title="Idea de la IA que entró al menú: todavía no es receta de la casa">${icon("spark", 14)} De prueba</span>` : ""}
           ${r.prep_minutes ? `<span class="muted">${icon("clock", 16)} ${r.prep_minutes} min</span>` : ""}</div>
         ${coverageBar(r.coverage)}
       </article>`).join("")}</div>`
@@ -709,9 +710,11 @@ function bindAI() {
     $("[data-ai-model]", row).onchange = (e) => safe(async () => {
       const value = e.target.value.trim() || META.ai[role].default;
       const res = await api("/api/settings", { method: "PUT", json: { [`ai_${role}_model`]: value } });
+      const before = META.ai[role].provider;
       META.ai = res.ai;
       e.target.value = META.ai[role].model;
       toast(`Modelo de ${META.ai[role].provider}: ${META.ai[role].model}`);
+      if (META.ai[role].provider !== before) renderHouse();  // cambió de proveedor: su clave y su lista
     });
     $("[data-ai-test]", row).onclick = (e) => withBusy(e.currentTarget, async () => {
       status("Probando…");
@@ -831,9 +834,11 @@ async function renderHouse() {
       </section>
       <section class="card stack" id="ai-card">
         <h2>Inteligencia artificial</h2>
-        ${aiRow("photo", "Fotos", "Facturas, nevera, alacena y recetas en foto.")}
-        ${aiRow("text", "Texto y voz", "Recetas escritas y frases que la tablet no entendió.")}
-        <p class="muted small" style="margin:0">Las claves se ponen en el computador de la casa (variables de entorno), no aquí.</p>
+        ${aiRow("photo", "Fotos", "Facturas, nevera, alacena y recetas en foto. Siempre con Gemini.")}
+        ${aiRow("text", "Voz", "Frases que la tablet no entendió y la agenda por voz. Mejor un modelo rápido (gemini-2.5-flash-lite).")}
+        ${aiRow("menu", "Menú y recetas", "Ideas del menú del domingo, el cuestionario de «Cómo comemos» y recetas escritas. Mejor calidad (gemini-2.5-flash).")}
+        <p class="muted small" style="margin:0">Con la clave de Gemini (<code>GEMINI_API_KEY</code>) alcanza para todo. Si prefieren OpenAI para el texto,
+          elijan un modelo «gpt-…» y pongan <code>OPENAI_API_KEY</code>. Las claves se ponen en el computador de la casa (variables de entorno), no aquí.</p>
       </section>
       <section class="card stack" id="gcal-card"><h2>Calendario de Google</h2><p class="muted small">Cargando…</p></section>
       <section class="card stack">
@@ -1029,8 +1034,8 @@ async function renderTaste() {
           <p style="margin:0">La IA lee las recetas que ya tienen y les hace unas preguntas cortas sobre cómo comen: lo que no se come en la casa,
             el picante, qué les gusta a los niños, cuánto tiempo hay para cocinar… Con eso escribe un resumen que después pueden corregir.</p>
           <div><button class="primary" id="t-quiz" ${t.ai_ready ? "" : "disabled"}>${icon("spark", 20)} Hacer el cuestionario</button></div>`}
-        ${t.ai_ready ? "" : `<p class="small" style="margin:0"><span class="badge warn">Falta ${esc(META.ai.text.key_env)}</span>
-          El cuestionario usa la IA de texto (Casa → Inteligencia artificial).</p>`}
+        ${t.ai_ready ? "" : `<p class="small" style="margin:0"><span class="badge warn">Falta ${esc(META.ai.menu.key_env)}</span>
+          El cuestionario usa la IA de «Menú y recetas» (Casa → Inteligencia artificial).</p>`}
       </section>
     </div>`;
 

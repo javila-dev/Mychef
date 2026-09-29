@@ -176,7 +176,7 @@ def plan_week(
     people = people or {}
     slots = sorted(set(slots), key=lambda s: (s[0], services.MEAL_ORDER.get(s[1], 9)))
     end = max((d for d, _ in slots), default=start)
-    recipes = list(session.exec(select(Recipe)))
+    recipes = list(session.exec(select(Recipe).where(Recipe.trial == False)))  # noqa: E712 (las de prueba no son de la casa)
     recent = recent_recipes(session, start)
     pantry = services.load_pantry(session)
     expiring = {

@@ -304,7 +304,7 @@ def suggest(
     }
 
     ranked = []
-    for recipe in session.exec(select(Recipe)):
+    for recipe in session.exec(select(Recipe).where(Recipe.trial == False)):  # noqa: E712
         if meal_type and meal_type not in recipe.meal_type_list:
             continue
         if dish_type and recipe.dish_type != dish_type:
@@ -505,6 +505,7 @@ def recipe_summary(recipe: Recipe) -> dict:
         "servings": recipe.servings,
         "prep_minutes": recipe.prep_minutes,
         "favorite": recipe.favorite,
+        "trial": recipe.trial,
     }
 
 

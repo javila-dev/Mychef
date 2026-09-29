@@ -5,11 +5,11 @@ from app.taste import TasteQuestion, TasteQuestions, TasteSummary
 
 
 def _ai_returns(monkeypatch, result, seen=None):
-    def fake(model, prompt, schema):
+    def fake(model, prompt, schema, fast=False):
         if seen is not None:
             seen.append(prompt)
         return result
-    monkeypatch.setattr(ai, "openai_parse", fake)
+    monkeypatch.setattr(ai, "text_parse", fake)
 
 
 def test_empty_profile(client):
@@ -54,9 +54,9 @@ def test_questions_read_the_house_recipes(client, monkeypatch):
 
 
 def test_questions_error_is_explained(client, monkeypatch):
-    def boom(model, prompt, schema):
+    def boom(model, prompt, schema, fast=False):
         raise ai.AIError("Falta configurar OPENAI_API_KEY para usar OpenAI.", 503)
-    monkeypatch.setattr(ai, "openai_parse", boom)
+    monkeypatch.setattr(ai, "text_parse", boom)
     r = client.post("/api/taste/questions")
     assert r.status_code == 503 and "OPENAI_API_KEY" in r.json()["detail"]
 

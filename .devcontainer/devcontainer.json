@@ -12,7 +12,7 @@
   "containerEnv": { "MYCHEF_TZ": "America/Bogota" },
   // Claves opcionales como secretos de Codespaces: Gemini para fotos, OpenAI para texto y voz.
   "secrets": {
-    "GEMINI_API_KEY": { "description": "Opcional: para leer facturas, la nevera y recetas en foto" },
-    "OPENAI_API_KEY": { "description": "Opcional: para recetas escritas y frases de voz difíciles" }
+    "GEMINI_API_KEY": { "description": "Recomendada: con ella funciona toda la IA (fotos, voz y menú)" },
+    "OPENAI_API_KEY": { "description": "Opcional: si prefieren OpenAI para el texto (con Gemini alcanza para todo)" }
   }
 }

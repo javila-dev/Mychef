@@ -22,7 +22,7 @@ def _say(client, text):
 
 
 def _ai_returns(monkeypatch, draft):
-    monkeypatch.setattr(ai, "openai_parse", lambda model, prompt, schema: draft)
+    monkeypatch.setattr(ai, "text_parse", lambda model, prompt, schema, fast=False: draft)
 
 
 def test_ai_without_date_asks_instead_of_inventing(client, monkeypatch):
@@ -54,9 +54,9 @@ def test_ai_good_answer_and_member_without_accents(client, monkeypatch):
 
 
 def test_ai_errors_do_not_break_the_voice(client, monkeypatch):
-    def boom(model, prompt, schema):
+    def boom(model, prompt, schema, fast=False):
         raise ai.AIError("OpenAI no dio una respuesta válida.", 422)
-    monkeypatch.setattr(ai, "openai_parse", boom)
+    monkeypatch.setattr(ai, "text_parse", boom)
     r = _say(client, "recuérdame lo de la abuela")
     assert r["intent"] == "agenda_ask"  # sin IA, igual pregunta el día
 

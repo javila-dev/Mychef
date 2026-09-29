@@ -490,7 +490,7 @@ cuándo, déjalo vacío (""): no lo inventes, a la familia se le pregunta.
 - time: HH:MM en 24 horas, o null si no dice hora ("a las 3" sin más = 15:00).
 - repeat: none, weekly, monthly o yearly (los cumpleaños son yearly).
 Si no es algo para la agenda, ok = false y lo demás vacío."""
-    draft = ai.openai_parse(model, prompt, EventDraft)
+    draft = ai.text_parse(model, prompt, EventDraft, fast=True)
     if not draft.ok:
         return None
     # Aunque la estructura venga bien, los valores se revisan: lo dudoso se pregunta, no se adivina.

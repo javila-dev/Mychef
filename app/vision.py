@@ -144,7 +144,7 @@ Reglas:
     full = (f"<receta>\n{text}\n</receta>\n\n" if text else "") + prompt
     if image:  # foto (con o sin texto): Gemini
         return ai.gemini_parse(photo_model or ai.DEFAULT_PHOTO_MODEL, [_check_image(*image)], full, RecipeDraft)
-    return ai.openai_parse(text_model or ai.DEFAULT_TEXT_MODEL, full, RecipeDraft)
+    return ai.text_parse(text_model or ai.default_model("menu"), full, RecipeDraft)
 
 
 def scan_receipt(
@@ -209,5 +209,5 @@ Reescribe la intención como UNO de estos comandos, en español, con los nombres
 - "qué falta comprar", "qué se vence", "qué tareas hay"
 - en modo cocina: "siguiente", "anterior", "repite", "cuánto <ingrediente> lleva", "ingredientes"
 Si la frase no pide nada de esto o es ruido, command = null. No inventes productos ni tareas."""
-    result = ai.openai_parse(model or ai.DEFAULT_TEXT_MODEL, prompt, VoiceCanonical)
+    result = ai.text_parse(model or ai.default_model("text"), prompt, VoiceCanonical, fast=True)
     return result.command

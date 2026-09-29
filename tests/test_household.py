@@ -285,14 +285,29 @@ def test_ai_models_are_chosen_in_settings(client, monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    for env in ("MYCHEF_PHOTO_MODEL", "MYCHEF_TEXT_MODEL", "MYCHEF_MENU_MODEL"):
+        monkeypatch.delenv(env, raising=False)
     meta = client.get("/api/meta").json()["ai"]
     assert meta["photo"]["provider"] == "Gemini" and meta["photo"]["configured"] is False
-    assert meta["text"]["provider"] == "OpenAI" and meta["text"]["model"] == ai.DEFAULT_TEXT_MODEL
+    # Por defecto todo con Gemini: una sola clave; la voz con el modelo rápido
+    assert (meta["text"]["provider"], meta["text"]["model"]) == ("Gemini", "gemini-2.5-flash-lite")
+    assert (meta["menu"]["provider"], meta["menu"]["model"]) == ("Gemini", "gemini-2.5-flash")
+    assert meta["text"]["key_env"] == "GEMINI_API_KEY"
+    # Si la casa solo tiene la clave de OpenAI, el texto sigue con OpenAI
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    meta = client.get("/api/meta").json()["ai"]
+    assert (meta["text"]["provider"], meta["text"]["model"], meta["text"]["configured"]) == ("OpenAI", "gpt-5-mini", True)
+    assert meta["photo"]["provider"] == "Gemini"
+    monkeypatch.delenv("OPENAI_API_KEY")
 
-    res = client.put("/api/settings", json={"ai_photo_model": "models/gemini-2.5-pro", "ai_text_model": "gpt-5"})
+    res = client.put("/api/settings", json={"ai_photo_model": "models/gemini-2.5-pro", "ai_text_model": "gpt-5",
+                                            "ai_menu_model": "gemini-2.5-pro"})
     assert res.json()["ai"]["photo"]["model"] == "gemini-2.5-pro"  # sin el prefijo "models/"
-    assert res.json()["ai"]["text"]["model"] == "gpt-5"
+    # El proveedor sale del nombre del modelo
+    assert (res.json()["ai"]["text"]["model"], res.json()["ai"]["text"]["provider"]) == ("gpt-5", "OpenAI")
+    assert res.json()["ai"]["menu"]["provider"] == "Gemini"
     assert client.put("/api/settings", json={"ai_text_model": "gpt 5; rm -rf"}).status_code == 422
+    assert client.put("/api/settings", json={"ai_photo_model": "gpt-5"}).status_code == 422  # las fotos, con Gemini
 
     # Sin clave: aviso claro, sin llamar a nadie
     r = client.post("/api/ai/test", json={"role": "photo"})

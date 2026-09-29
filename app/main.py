@@ -18,7 +18,7 @@ import segno
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from . import agenda, ai, clock, gcal, household, inventory, planner, prize_icons, rewards, services, storage, taste, vision, voice
+from . import agenda, ai, clock, gcal, household, inventory, ideas, planner, prize_icons, rewards, services, storage, taste, vision, voice
 from . import auth
 from .auth import AuthMiddleware, pin_enabled
 from . import db
@@ -231,6 +231,7 @@ class SettingsIn(BaseModel):
     inventory_mode: str | None = None
     ai_photo_model: str | None = Field(None, max_length=80)
     ai_text_model: str | None = Field(None, max_length=80)
+    ai_menu_model: str | None = Field(None, max_length=80)
     # Quién come cada comida si no es toda la casa: {"merienda": [id de Benja]}; lista vacía = todos
     meal_people: dict[str, list[int]] | None = None
 
@@ -359,6 +360,8 @@ def update_settings(data: SettingsIn, session: Session = SessionDep):
             value = value.strip().removeprefix("models/")
             if value and not ai.MODEL_NAME.match(value):
                 raise HTTPException(422, "Ese nombre de modelo no es válido.")
+            if value and role == "photo" and ai.provider_of(value) != "Gemini":
+                raise HTTPException(422, "Las fotos las lee Gemini: elijan un modelo «gemini-…».")
             session.merge(Setting(key=ai.ROLES[role]["setting"], value=value))
     if data.meal_people is not None:
         _validate_meals(list(data.meal_people))
@@ -385,24 +388,26 @@ ai_model = ai.model_for
 
 
 def _ai_status(session: Session) -> dict:
-    return {
-        role: {"provider": r["provider"], "key_env": r["key_env"], "configured": ai.configured(role),
-               "model": ai_model(session, role), "default": r["default"]}
-        for role, r in ai.ROLES.items()
-    }
+    out = {}
+    for role in ai.ROLES:
+        model = ai_model(session, role)
+        provider = ai.provider_of(model)
+        out[role] = {"provider": provider, "key_env": ai.KEY_ENV[provider], "configured": ai.has_key(provider),
+                     "model": model, "default": ai.default_model(role)}
+    return out
 
 
 @app.get("/api/ai/models")
-def ai_models(role: Literal["photo", "text"]):
-    """Modelos que su clave puede usar (para la lista de Ajustes)."""
+def ai_models(role: Literal["photo", "text", "menu"]):
+    """Modelos que sus claves pueden usar (para la lista de Ajustes)."""
     try:
-        return {"models": ai.list_models(role)}
+        return {"models": ai.models_for_role(role)}
     except ai.AIError as e:
         raise HTTPException(e.status, str(e)) from e
 
 
 class AITestIn(BaseModel):
-    role: Literal["photo", "text"]
+    role: Literal["photo", "text", "menu"]
 
 
 @app.post("/api/ai/test")
@@ -410,7 +415,7 @@ def ai_test(data: AITestIn, session: Session = SessionDep):
     model = ai_model(session, data.role)
     started = time.time()
     try:
-        ai.test_model(data.role, model)
+        ai.test_model(model)
     except ai.AIError as e:
         raise HTTPException(e.status, str(e)) from e
     return {"ok": True, "model": model, "seconds": round(time.time() - started, 1)}
@@ -723,7 +728,7 @@ async def import_recipe(
         image = (await photo.read(), photo.content_type or "")
     try:
         draft = vision.parse_recipe(
-            text, image, known, photo_model=ai_model(session, "photo"), text_model=ai_model(session, "text")
+            text, image, known, photo_model=ai_model(session, "photo"), text_model=ai_model(session, "menu")
         )
     except vision.VisionError as e:
         raise HTTPException(e.status, str(e)) from e
@@ -851,10 +856,31 @@ def menu_plan(data: PlanIn, session: Session = SessionDep):
                              keep_existing=data.keep_existing)
 
 
+class IdeasIn(BaseModel):
+    start: dt.date
+    slots: list[PlanSlot] = Field(min_length=1, max_length=4 * 14)
+    avoid: list[str] = Field(default_factory=list, max_length=60)  # «Otra»: las que ya vieron
+
+
+@app.post("/api/menu/ideas")
+def menu_ideas(data: IdeasIn, session: Session = SessionDep):
+    """Menú del domingo: recetas nuevas de la IA con lo que hay (borradores; no se guarda nada)."""
+    _validate_meals([s.meal for s in data.slots])
+    slots = []
+    for s in data.slots:
+        adults, kids = _servings(session, s.servings, s.kids, s.meal)
+        slots.append({"day": s.day.isoformat(), "meal": s.meal, "adults": adults, "kids": kids})
+    try:
+        return ideas.propose(session, data.start, slots, [a[:80] for a in data.avoid])
+    except ai.AIError as e:
+        raise HTTPException(e.status, str(e)) from e
+
+
 class WeekEntryIn(BaseModel):
     day: dt.date
     meal_type: str
-    recipe_id: int
+    recipe_id: int | None = None
+    new_recipe: RecipeIn | None = None  # idea de la IA: se guarda como receta de prueba
     servings: int | None = Field(None, ge=0)
     kids: int | None = Field(None, ge=0)
 
@@ -865,15 +891,36 @@ class WeekIn(BaseModel):
     replace: list[PlanSlot] = Field(default_factory=list, max_length=4 * 14)
 
 
+def _new_trial_recipe(session: Session, data: RecipeIn) -> Recipe:
+    """Una idea de la IA que entra al menú: queda como receta de prueba (la misma idea dos veces, una sola receta)."""
+    same = session.exec(select(Recipe).where(Recipe.name == data.name.strip(), Recipe.trial == True)).first()  # noqa: E712
+    if same:
+        return same
+    if data.dish_type not in DISH_TYPES:
+        data.dish_type = "plato principal"
+    recipe = Recipe(**data.model_dump(exclude={"ingredients", "meal_types"}),
+                    meal_types=",".join(_validate_meals(data.meal_types)), trial=True)
+    recipe.name = recipe.name.strip()
+    session.add(recipe)
+    session.flush()
+    services.set_recipe_ingredients(session, recipe, data.ingredients)
+    return recipe
+
+
 @app.post("/api/menu/week", status_code=201)
 def save_menu_week(data: WeekIn, session: Session = SessionDep):
     """Guarda de una vez la semana que aprobó la familia."""
     _validate_meals([e.meal_type for e in data.entries] + [s.meal for s in data.replace])
     items = []
     for e in data.entries:
-        _get_recipe(session, e.recipe_id)
+        if e.new_recipe is not None:
+            recipe_id = _new_trial_recipe(session, e.new_recipe).id
+        elif e.recipe_id is not None:
+            recipe_id = _get_recipe(session, e.recipe_id).id
+        else:
+            raise HTTPException(422, "Falta la receta.")
         adults, kids = _servings(session, e.servings, e.kids, e.meal_type)
-        items.append({"day": e.day, "meal_type": e.meal_type, "recipe_id": e.recipe_id,
+        items.append({"day": e.day, "meal_type": e.meal_type, "recipe_id": recipe_id,
                       "servings": adults, "kids": kids})
     created = planner.save_week(session, items, [(s.day, s.meal) for s in data.replace])
     session.commit()

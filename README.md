@@ -128,7 +128,7 @@ python -m app.seed
    privada a su cuenta de GitHub, y como es HTTPS el micrófono funciona.
 
 El codespace se apaga solo si no se usa (los datos se conservan mientras no lo borren). Las cuentas
-personales de GitHub traen horas gratis al mes. Para la IA, guarden `GEMINI_API_KEY` y `OPENAI_API_KEY` en
+personales de GitHub traen horas gratis al mes. Para la IA, guarden `GEMINI_API_KEY` (y, si la usan, `OPENAI_API_KEY`) en
 *Settings → Codespaces → Secrets*.
 
 ### Con Docker
@@ -284,7 +284,7 @@ Requisitos del navegador para la voz:
   Si la app está publicada en internet con HTTPS, no hace falta nada.
 
 La frase se interpreta en el computador de la casa con reglas propias (rápido y gratis). Si alguien
-dice algo que no encaja y hay `OPENAI_API_KEY`, el modelo de OpenAI elegido la traduce a uno de los comandos conocidos.
+dice algo que no encaja y hay IA configurada, el modelo de «Voz» la traduce a uno de los comandos conocidos.
 
 ### Entrar con usuario y contraseña (obligatorio si la app está en internet)
 
@@ -307,22 +307,28 @@ segura sola (por el encabezado `X-Forwarded-Proto`).
 Solo dentro de la red de la casa, en vez de usuario y contraseña puede usarse un PIN (`MYCHEF_PIN=2580`):
 es más cómodo en la tablet, pero un PIN corto no aguanta estar publicado en internet.
 
-### Inteligencia artificial: Gemini para fotos, OpenAI para texto (opcional)
+### Inteligencia artificial: Gemini (opcional; OpenAI también sirve para el texto)
 
-| Para qué | Proveedor | Clave |
+Con una sola clave de Gemini funciona todo. Tiene capa gratuita, que para una casa suele alcanzar;
+con la capa gratuita Google puede usar lo que se le manda para mejorar sus productos, así que si les
+importa activen la facturación (para una casa son centavos al mes).
+
+| Para qué | Modelo por defecto | Variable |
 |---|---|---|
-| **Fotos**: facturas, nevera y alacena (con los números encima), recetas en foto | Google **Gemini** | `GEMINI_API_KEY` (o `GOOGLE_API_KEY`) |
-| **Texto y voz**: recetas escritas, frases que la tablet no entendió y el cuestionario de «Cómo comemos» | **OpenAI** | `OPENAI_API_KEY` |
+| **Fotos**: facturas, nevera y alacena (con los números encima), recetas en foto | `gemini-2.5-flash` (siempre Gemini) | `MYCHEF_PHOTO_MODEL` |
+| **Voz**: frases que la tablet no entendió y la agenda por voz (tiene que ser rápido) | `gemini-2.5-flash-lite` | `MYCHEF_TEXT_MODEL` |
+| **Menú y recetas**: ideas del menú del domingo, cuestionario de «Cómo comemos», recetas escritas | `gemini-2.5-flash` | `MYCHEF_MENU_MODEL` |
 
 ```bash
 export GEMINI_API_KEY=...      # https://aistudio.google.com/apikey
-export OPENAI_API_KEY=sk-...   # https://platform.openai.com/api-keys
+export OPENAI_API_KEY=sk-...   # opcional: https://platform.openai.com/api-keys
 ```
 
-**El modelo de cada uno se elige en Ajustes → Casa → Inteligencia artificial.** Ahí se ve si la
-clave está lista, aparece la lista de modelos que su clave puede usar (se puede escribir cualquier otro) y
-el botón **Probar** confirma que funciona. Por defecto: `gemini-2.5-flash` y `gpt-5-mini` (también se
-pueden cambiar con `MYCHEF_PHOTO_MODEL` y `MYCHEF_TEXT_MODEL`).
+**El modelo de cada uso se elige en Ajustes → Casa → Inteligencia artificial**, y el proveedor sale
+del nombre: `gemini-…` va a Gemini y `gpt-…` a OpenAI (con OpenAI, la voz le pide pensar poco para
+contestar rápido). Ahí se ve si la clave está lista, aparece la lista de modelos que sus claves pueden
+usar (se puede escribir cualquier otro) y el botón **Probar** confirma que funciona. Si la casa solo
+tiene `OPENAI_API_KEY`, el texto usa `gpt-5-mini` como antes.
 
 Sin claves todo lo demás funciona igual; esos botones muestran un aviso. Las claves se guardan en el
 computador de la casa (variables de entorno o secretos de Codespaces), nunca en la base de datos.

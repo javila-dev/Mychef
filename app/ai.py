@@ -1,7 +1,14 @@
-"""Proveedores de IA de la casa: Gemini lee las fotos y OpenAI se encarga del texto.
+"""Proveedores de IA de la casa: Gemini (fotos y texto) y, si prefieren, OpenAI para el texto.
+
+Hay tres usos, cada uno con su modelo elegido en Ajustes (se guarda en la base de datos):
+- photo: facturas, nevera, alacena y recetas en foto. Siempre Gemini.
+- text: frases que la tablet no entendió y la agenda por voz. Tiene que ser rápido.
+- menu: ideas del menú del domingo, el cuestionario de «Cómo comemos» y recetas escritas. Mejor calidad.
+El proveedor sale del nombre del modelo: «gemini-…» va a Gemini y lo demás («gpt-…») a OpenAI.
+Por defecto todo va con Gemini (una sola clave, y tiene capa gratuita); si la casa solo tiene la
+clave de OpenAI, el texto sigue con OpenAI como antes.
 
 Las claves van en variables de entorno (GEMINI_API_KEY o GOOGLE_API_KEY, y OPENAI_API_KEY).
-El modelo de cada uno se elige en Ajustes y se guarda en la base de datos.
 Sin clave, el resto de la aplicación funciona igual y solo esas funciones avisan.
 """
 
@@ -22,24 +29,18 @@ from pydantic import BaseModel, ValidationError
 log = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
-DEFAULT_PHOTO_MODEL = os.environ.get("MYCHEF_PHOTO_MODEL", "gemini-2.5-flash")
-DEFAULT_TEXT_MODEL = os.environ.get("MYCHEF_TEXT_MODEL", "gpt-5-mini")
 MODEL_NAME = re.compile(r"^[\w.\-:/]{2,80}$")
+KEY_ENV = {"Gemini": "GEMINI_API_KEY", "OpenAI": "OPENAI_API_KEY"}
 
+# Modelos por defecto de cada uso, según el proveedor (se pueden cambiar con MYCHEF_*_MODEL)
 ROLES = {
-    "photo": {"provider": "Gemini", "setting": "ai_photo_model", "default": DEFAULT_PHOTO_MODEL,
-              "key_env": "GEMINI_API_KEY"},
-    "text": {"provider": "OpenAI", "setting": "ai_text_model", "default": DEFAULT_TEXT_MODEL,
-             "key_env": "OPENAI_API_KEY"},
+    "photo": {"setting": "ai_photo_model", "env": "MYCHEF_PHOTO_MODEL",
+              "Gemini": "gemini-2.5-flash", "OpenAI": None},
+    "text": {"setting": "ai_text_model", "env": "MYCHEF_TEXT_MODEL",
+             "Gemini": "gemini-2.5-flash-lite", "OpenAI": "gpt-5-mini"},
+    "menu": {"setting": "ai_menu_model", "env": "MYCHEF_MENU_MODEL",
+             "Gemini": "gemini-2.5-flash", "OpenAI": "gpt-5-mini"},
 }
-
-
-def model_for(session, role: str) -> str:
-    """El modelo elegido en Ajustes para fotos (Gemini) o texto (OpenAI)."""
-    from .models import Setting
-
-    s = session.get(Setting, ROLES[role]["setting"])
-    return s.value if s and s.value else ROLES[role]["default"]
 
 
 class AIError(Exception):
@@ -56,8 +57,46 @@ def openai_key() -> str | None:
     return os.environ.get("OPENAI_API_KEY")
 
 
-def configured(role: str) -> bool:
-    return bool(gemini_key() if role == "photo" else openai_key())
+def provider_of(model: str) -> str:
+    return "Gemini" if model.removeprefix("models/").startswith(("gemini", "gemma")) else "OpenAI"
+
+
+def has_key(provider: str) -> bool:
+    return bool(gemini_key() if provider == "Gemini" else openai_key())
+
+
+def default_model(role: str) -> str:
+    r = ROLES[role]
+    if os.environ.get(r["env"]):
+        return os.environ[r["env"]]
+    # Gemini si está su clave (o si no hay ninguna: es lo recomendado); OpenAI si es la única que hay
+    if r["OpenAI"] and not gemini_key() and openai_key():
+        return r["OpenAI"]
+    return r["Gemini"]
+
+
+DEFAULT_PHOTO_MODEL = ROLES["photo"]["Gemini"]
+
+
+def model_for(session, role: str) -> str:
+    """El modelo elegido en Ajustes para ese uso, o el de por defecto."""
+    from .models import Setting
+
+    s = session.get(Setting, ROLES[role]["setting"])
+    return s.value if s and s.value else default_model(role)
+
+
+def ready(session, role: str) -> bool:
+    """¿Está la clave del proveedor del modelo que usa ese uso?"""
+    return has_key(provider_of(model_for(session, role)))
+
+
+def text_parse(model: str, prompt: str, schema: type[T], fast: bool = False) -> T:
+    """Una pregunta de texto con respuesta estructurada, al proveedor que corresponda al modelo.
+    fast = que conteste rápido (la voz): OpenAI piensa lo mínimo."""
+    if provider_of(model) == "Gemini":
+        return gemini_parse(model, [], prompt, schema)
+    return openai_parse(model, prompt, schema, fast=fast)
 
 
 def _status_error(provider: str, model: str, code: int | None, message: str | None) -> AIError:
@@ -77,7 +116,7 @@ def _status_error(provider: str, model: str, code: int | None, message: str | No
 def gemini_parse(model: str, images: list[tuple[bytes, str]], prompt: str, schema: type[T]) -> T:
     key = gemini_key()
     if not key:
-        raise AIError("Falta configurar GEMINI_API_KEY para leer fotos con Gemini.", 503)
+        raise AIError("Falta configurar GEMINI_API_KEY para usar Gemini.", 503)
     client = genai.Client(api_key=key)
     parts: list = [genai_types.Part.from_bytes(data=data, mime_type=mt) for data, mt in images]
     parts.append(prompt)
@@ -107,13 +146,16 @@ def gemini_parse(model: str, images: list[tuple[bytes, str]], prompt: str, schem
 
 # ---------------------------------------------------------------- OpenAI (texto)
 
-def openai_parse(model: str, prompt: str, schema: type[T]) -> T:
+def openai_parse(model: str, prompt: str, schema: type[T], fast: bool = False) -> T:
     key = openai_key()
     if not key:
         raise AIError("Falta configurar OPENAI_API_KEY para usar OpenAI.", 503)
     client = openai.OpenAI(api_key=key)
     try:
-        response = client.responses.parse(model=model, input=prompt, text_format=schema)
+        extra = {}
+        if fast and model.startswith(("gpt-5", "o3", "o4")):
+            extra["reasoning"] = {"effort": "low"}  # la voz no puede esperar a que piense
+        response = client.responses.parse(model=model, input=prompt, text_format=schema, **extra)
     except openai.AuthenticationError as e:
         raise _status_error("OpenAI", model, 401, None) from e
     except openai.NotFoundError as e:
@@ -146,15 +188,15 @@ _MODELS_CACHE: dict[str, tuple[float, list[str]]] = {}
 _OPENAI_SKIP = ("audio", "realtime", "tts", "transcribe", "image", "search", "embedding", "moderation", "codex")
 
 
-def list_models(role: str) -> list[str]:
+def list_models(provider: str) -> list[str]:
     """Modelos que la clave puede usar, para elegir en Ajustes (se guardan 10 minutos)."""
-    cached = _MODELS_CACHE.get(role)
+    cached = _MODELS_CACHE.get(provider)
     if cached and time.time() - cached[0] < 600:
         return cached[1]
-    if not configured(role):
+    if not has_key(provider):
         return []
     try:
-        if role == "photo":
+        if provider == "Gemini":
             client = genai.Client(api_key=gemini_key())
             names = [
                 (m.name or "").removeprefix("models/")
@@ -169,20 +211,22 @@ def list_models(role: str) -> list[str]:
                 and not any(s in m.id for s in _OPENAI_SKIP)
             ]
     except (genai_errors.APIError, openai.OpenAIError, OSError, ValueError) as e:
-        raise AIError(f"No se pudo pedir la lista de modelos a {ROLES[role]['provider']}: {e}") from e
+        raise AIError(f"No se pudo pedir la lista de modelos a {provider}: {e}") from e
     names = sorted(set(names), reverse=True)
-    _MODELS_CACHE[role] = (time.time(), names)
+    _MODELS_CACHE[provider] = (time.time(), names)
     return names
+
+
+def models_for_role(role: str) -> list[str]:
+    """Las fotos solo con Gemini; el texto con cualquiera de los dos que tenga clave."""
+    providers = ["Gemini"] if ROLES[role]["OpenAI"] is None else ["Gemini", "OpenAI"]
+    return [m for p in providers for m in list_models(p)]
 
 
 class _Ping(BaseModel):
     ok: bool
 
 
-def test_model(role: str, model: str) -> None:
+def test_model(model: str) -> None:
     """Una pregunta mínima para comprobar que la clave y el modelo funcionan."""
-    prompt = 'Responde con {"ok": true}.'
-    if role == "photo":
-        gemini_parse(model, [], prompt, _Ping)
-    else:
-        openai_parse(model, prompt, _Ping)
+    text_parse(model, 'Responde con {"ok": true}.', _Ping)
