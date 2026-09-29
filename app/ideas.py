@@ -240,6 +240,7 @@ def propose(session: Session, start: dt.date, slots: list[dict], avoid: list[str
     recent = planner.recent_recipes(session, start)
     names = [r.name for r in session.exec(select(Recipe).where(Recipe.trial == False))]  # noqa: E712
     names += [session.get(Recipe, rid).name for rid in recent if session.get(Recipe, rid)]
+    names += [r.name for r in session.exec(select(Recipe).where(Recipe.disliked == True))]  # noqa: E712 (no les gustó)
     names = list(dict.fromkeys(names + list(avoid or [])))[:120]
     context, pantry_txt, staples = taste.context(session), _pantry_text(session, pantry, start), _staples_text(session)
     model = ai.model_for(session, "menu")

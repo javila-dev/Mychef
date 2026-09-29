@@ -506,6 +506,7 @@ def recipe_summary(recipe: Recipe) -> dict:
         "prep_minutes": recipe.prep_minutes,
         "favorite": recipe.favorite,
         "trial": recipe.trial,
+        "disliked": recipe.disliked,
     }
 
 

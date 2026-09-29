@@ -2761,9 +2761,29 @@ async function finishCooking(btn, r, { recipeId, entryId, servings, kids }) {
       }
     });
     stopCookVoice();
-    await doneModal("¡Buen provecho!", "Se descontó lo que se usó de la nevera y la alacena.");
+    // Era una idea nueva de la IA: ¿les gustó? Así pasa a las de la casa o no se vuelve a proponer.
+    const verdict = r.trial ? await likedModal(r) : null;
+    await doneModal("¡Buen provecho!", verdict === "yes" ? `«${r.name}» ya es una receta de la casa.`
+      : verdict === "no" ? "No se las volvemos a proponer." : "Se descontó lo que se usó de la nevera y la alacena.");
     home();
   });
+}
+
+function likedModal(r) {
+  const m = modal({
+    size: "narrow", title: `¿Les gustó «${esc(r.name)}»?`,
+    body: `<p class="m-text">Era una idea nueva. Si les gustó, queda entre las recetas de la casa.</p>
+      <div class="liked-opts">
+        <button class="primary big" data-v="yes">${icon("heart", 26)} ¡Sí! Guardarla</button>
+        <button class="big" data-v="meh">Más o menos</button>
+        <button class="big" data-v="no">${icon("close", 24)} No nos gustó</button>
+      </div>`,
+  });
+  $$("[data-v]", m.el).forEach((b) => b.onclick = () => withBusy(b, async () => {
+    const ok = await safe(() => api(`/api/recipes/${r.id}/verdict`, { method: "POST", json: { verdict: b.dataset.v } }));
+    if (ok) m.close(b.dataset.v);
+  }));
+  return m.done;
 }
 
 // ---------------------------------------------------------------- voz

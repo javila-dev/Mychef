@@ -137,7 +137,8 @@ async function renderRecipes(filters = {}) {
           <span class="muted small">${r.servings} porc.</span></div>
         <div class="row small">${r.meal_types.map((m) => `<span class="badge accent">${esc(m)}</span>`).join("")}
           <span class="badge">${esc(r.dish_type)}</span>
-          ${r.trial ? `<span class="badge warn" title="Idea de la IA que entró al menú: todavía no es receta de la casa">${icon("spark", 14)} De prueba</span>` : ""}
+          ${r.disliked ? `<span class="badge bad" title="La probaron y no les gustó: la IA no la vuelve a proponer">No les gustó</span>`
+            : r.trial ? `<span class="badge warn" title="Idea de la IA que entró al menú: todavía no es receta de la casa">${icon("spark", 14)} De prueba</span>` : ""}
           ${r.prep_minutes ? `<span class="muted">${icon("clock", 16)} ${r.prep_minutes} min</span>` : ""}</div>
         ${coverageBar(r.coverage)}
       </article>`).join("")}</div>`
@@ -170,6 +171,10 @@ async function showRecipe(id, adults, kids) {
           <span class="muted">Receta original: ${r.servings} porciones de adulto</span></div></div>
       <button class="m-x" id="x" aria-label="Cerrar">${icon("close")}</button>
     </div>
+    ${r.trial ? `<div class="row spread trial-note" style="margin-top:.75rem">
+      <span>${icon("spark", 18)} ${r.disliked ? "Idea de la IA que no les gustó: no se vuelve a proponer." : "Idea de la IA, de prueba: no se usa para armar el menú hasta que la guarden."}</span>
+      <span class="row"><button class="primary" data-verdict="yes">${icon("heart", 18)} Guardar en las recetas de la casa</button>
+        ${r.disliked ? "" : `<button data-verdict="no">No nos gustó</button>`}</span></div>` : ""}
     <div class="row" style="margin:.75rem 0">
       <span>Para</span>
       <button data-w="a" data-d="-1" aria-label="Menos adultos">${icon("minus", 18)}</button><strong>${adults}</strong><button data-w="a" data-d="1" aria-label="Más adultos">${icon("plus", 18)}</button>
@@ -202,6 +207,12 @@ async function showRecipe(id, adults, kids) {
     const k = Math.max(0, kids + (b.dataset.w === "k" ? +b.dataset.d : 0));
     if (a + k >= 1) safe(() => showRecipe(id, a, k));
   });
+  $$("[data-verdict]", modalBody).forEach((b) => b.onclick = () => safe(async () => {
+    await api(`/api/recipes/${id}/verdict`, { method: "POST", json: { verdict: b.dataset.verdict } });
+    toast(b.dataset.verdict === "yes" ? `«${r.name}» ya es una receta de la casa` : "No se vuelve a proponer");
+    showRecipe(id, adults, kids);
+    refresh();
+  }));
   $("#edit").onclick = () => safe(async () => recipeForm(await api(`/api/recipes/${id}`)));
   $("#del").onclick = () => safe(async () => {
     if (!await confirmModal({ title: "¿Eliminar la receta?", text: `«${esc(r.name)}» se borra y también se quita del menú.`, ok: "Eliminar", tone: "danger", okIcon: "trash" })) return;

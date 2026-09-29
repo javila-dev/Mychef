@@ -124,3 +124,34 @@ def test_saved_ideas_are_trial_recipes(client, monkeypatch):
     recipe = client.get(f"/api/recipes/{saved[0]['recipe']['id']}").json()
     assert recipe["trial"] and [i["name"] for i in recipe["ingredients"]] == ["Pollo", "Arroz", "Cilantro"]
     assert client.post("/api/menu/week", json={"entries": [{"day": MON, "meal_type": "almuerzo"}]}).status_code == 422
+
+
+def test_did_they_like_it(client, monkeypatch):
+    stock(client, ("Pollo", 1, "kg", "carnes"))
+    fake_ai(monkeypatch, [])
+    lunch = ask(client, [(MON, "almuerzo")]).json()["slots"][0]
+    saved = client.post("/api/menu/week", json={"entries": [
+        {"day": MON, "meal_type": "almuerzo", "new_recipe": lunch["main"]["draft"]},
+        {"day": MON, "meal_type": "almuerzo", "new_recipe": lunch["salad"]["draft"]}]}).json()
+    good, bad = saved[0]["recipe"]["id"], saved[1]["recipe"]["id"]
+
+    # ¡Sí! pasa a las recetas de la casa: ya cuenta para armar el menú
+    r = client.post(f"/api/recipes/{good}/verdict", json={"verdict": "yes"}).json()
+    assert (r["trial"], r["disliked"]) == (False, False)
+    assert [s["recipe"]["id"] for s in client.get("/api/suggestions?meal_type=almuerzo").json()] == [good]
+
+    # No nos gustó: sigue de prueba y la IA no la vuelve a proponer
+    r = client.post(f"/api/recipes/{bad}/verdict", json={"verdict": "no"}).json()
+    assert (r["trial"], r["disliked"]) == (True, True)
+    prompts = []
+    fake_ai(monkeypatch, prompts)
+    ask(client, [(TUE, "almuerzo")])
+    prompt = prompts[0]
+    avoid = prompt.split("NO debes repetir")[1].split("\n")[0]
+    assert "Ensalada 0" in avoid
+    assert "que sí les gustaron: Pollo de la IA 0" in prompt and "NO les gustaron (no propongas nada parecido): Ensalada 0" in prompt
+
+    # Más o menos: queda de prueba, sin marca
+    r = client.post(f"/api/recipes/{bad}/verdict", json={"verdict": "meh"}).json()
+    assert (r["trial"], r["disliked"]) == (True, False)
+    assert client.post(f"/api/recipes/{bad}/verdict", json={"verdict": "tal vez"}).status_code == 422

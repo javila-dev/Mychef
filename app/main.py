@@ -578,6 +578,25 @@ def update_recipe(recipe_id: int, data: RecipeIn, session: Session = SessionDep)
     return services.recipe_detail(recipe)
 
 
+class VerdictIn(BaseModel):
+    verdict: Literal["yes", "meh", "no"]
+
+
+@app.post("/api/recipes/{recipe_id}/verdict")
+def recipe_verdict(recipe_id: int, data: VerdictIn, session: Session = SessionDep):
+    """¿Les gustó la idea nueva? Sí = pasa a las recetas de la casa; no = la IA no la vuelve a proponer."""
+    recipe = _get_recipe(session, recipe_id)
+    if data.verdict == "yes":
+        recipe.trial, recipe.disliked = False, False
+    elif data.verdict == "no":
+        recipe.disliked = True
+    else:
+        recipe.disliked = False  # más o menos: sigue de prueba
+    session.commit()
+    session.refresh(recipe)
+    return services.recipe_summary(recipe)
+
+
 @app.delete("/api/recipes/{recipe_id}", status_code=204)
 def delete_recipe(recipe_id: int, session: Session = SessionDep):
     recipe = _get_recipe(session, recipe_id)
@@ -899,7 +918,7 @@ def _new_trial_recipe(session: Session, data: RecipeIn) -> Recipe:
     if data.dish_type not in DISH_TYPES:
         data.dish_type = "plato principal"
     recipe = Recipe(**data.model_dump(exclude={"ingredients", "meal_types"}),
-                    meal_types=",".join(_validate_meals(data.meal_types)), trial=True)
+                    meal_types=",".join(_validate_meals(data.meal_types)), trial=True, ai_idea=True)
     recipe.name = recipe.name.strip()
     session.add(recipe)
     session.flush()

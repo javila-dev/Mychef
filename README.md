@@ -46,6 +46,9 @@ pocas palabras, siempre un **← Volver**, y si nadie la toca por 2 minutos vuel
   y con lo que se consigue en la tienda. Tocando un plato se cambia por otra receta de la casa, se pide otra
   idea o se elige la ensalada del almuerzo. Al guardar, lo que falta pasa a la lista de compras y las ideas
   quedan como recetas de prueba. Lo elegido se guarda en la tablet: si vuelve sola al inicio, se sigue donde iba.
+  Cuando se termina de cocinar una idea nueva, la tablet pregunta **¿Les gustó?**: «¡Sí!» la pasa a las recetas
+  de la casa, «No nos gustó» hace que la IA no la vuelva a proponer (y aprende de las dos cosas). También se
+  decide en Administrar → Recetas, donde las de prueba llevan su marca.
 - **Ojo con esto**: lo que se vence pronto y lo que se está acabando.
 - **📅 Agenda de la familia**: citas médicas, cosas del colegio (lo de Benja), cumpleaños, pagos y planes.
   Cada cosa tiene día, hora (opcional), para quién es y si se repite (cada semana, cada mes, cada año).

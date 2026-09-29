@@ -94,6 +94,10 @@ class Recipe(SQLModel, table=True):
     # Idea nueva de la IA que entró al menú: de prueba hasta que la familia diga que le gustó
     # (no cuenta como receta de la casa para planear ni para sugerir)
     trial: bool = False
+    # La probaron y no les gustó: la IA no la vuelve a proponer
+    disliked: bool = False
+    # Nació como idea de la IA (aunque ya sea de la casa): para que aprenda de lo que les gustó
+    ai_idea: bool = False
     created_at: dt.datetime = Field(default_factory=utcnow)
 
     ingredients: List["RecipeIngredient"] = Relationship(

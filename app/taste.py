@@ -93,6 +93,14 @@ def context(session: Session) -> str:
     parts = [_where(p), _people(session)]
     if p["summary"]:
         parts.append(f"Cómo comen (lo dijo la familia):\n{p['summary']}")
+    # Lo que ya probaron de las ideas nuevas: para aprender de sus gustos
+    ideas = session.exec(select(Recipe).where(Recipe.ai_idea == True)).all()  # noqa: E712
+    liked = [r.name for r in ideas if not r.trial and not r.disliked][:20]
+    disliked = [r.name for r in ideas if r.disliked][:20]
+    if liked:
+        parts.append(f"Ideas nuevas que sí les gustaron: {', '.join(liked)}.")
+    if disliked:
+        parts.append(f"Ideas nuevas que NO les gustaron (no propongas nada parecido): {', '.join(disliked)}.")
     parts.append(ADVENTURE[p["adventure"]])
     return "\n".join(parts)
 

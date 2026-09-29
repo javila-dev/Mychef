@@ -330,6 +330,10 @@ dialog::backdrop { background: rgba(22, 32, 24, .45); animation: fade-in .22s va
 .quiz-q { margin: 0 0 .6rem; font-size: 1.25rem; font-weight: 600; }
 .quiz-opts label > span { padding: .75rem 1.2rem; font-size: 1.05rem; }
 
+/* Receta de prueba (idea de la IA) en Administrar → Recetas */
+.trial-note { padding: .7rem 1rem; border-radius: var(--r-sm); background: var(--tint-lilac); color: var(--tint-lilac-ink); flex-wrap: wrap; gap: .6rem; }
+.trial-note > span:first-child { display: inline-flex; align-items: center; gap: .4rem; }
+
 /* Modelos de IA (Administrar → Casa y tareas) */
 .ai-row + .ai-row { border-top: 1px dashed var(--line); padding-top: .8rem; }
 .ok-text { color: var(--green-ink); font-weight: 500; }
