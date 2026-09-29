@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import math
 from dataclasses import dataclass
 
@@ -12,6 +13,7 @@ from . import clock
 from .models import (
     CookLog,
     Ingredient,
+    Member,
     MenuEntry,
     PantryItem,
     Recipe,
@@ -85,6 +87,27 @@ def portions(session: Session, adults: int | None = None, kids: int | None = Non
         adults = household_size(session)
         kids = household_kids(session) if kids is None else kids
     return adults + (kids or 0) * kid_portion(session)
+
+
+def meal_people(session: Session) -> dict[str, list[int]]:
+    """Quién come en cada comida, si no es toda la casa: {"merienda": [id de Benja]}."""
+    s = session.get(Setting, "meal_people")
+    try:
+        data = json.loads(s.value) if s else {}
+    except ValueError:
+        return {}
+    return {meal: [int(i) for i in ids] for meal, ids in data.items() if isinstance(ids, list) and ids}
+
+
+def meal_diners(session: Session, meal: str | None) -> tuple[int, int]:
+    """(adultos, niños) que comen esa comida: los elegidos en Ajustes o, si no, la casa completa."""
+    ids = meal_people(session).get(meal or "")
+    if ids:
+        members = session.exec(select(Member).where(Member.id.in_(ids))).all()
+        if members:
+            kids = sum(1 for m in members if m.kid)
+            return len(members) - kids, kids
+    return household_size(session), household_kids(session)
 
 
 def entry_portions(session: Session, entry: MenuEntry) -> float:
@@ -354,12 +377,11 @@ def autoplan(
     kids: int | None = None,
 ) -> list[MenuEntry]:
     """Llena el menú de la semana con recetas de la casa, gastando primero lo que hay.
-    servings = adultos; kids = niños (por defecto, los de la casa)."""
-    if servings is None:
-        servings = household_size(session)
-        kids = household_kids(session) if kids is None else kids
-    kids = kids or 0
-    eaten = portions(session, servings, kids)
+    servings = adultos; kids = niños (por defecto, los que comen cada comida)."""
+    def diners(meal: str) -> tuple[int, int]:
+        if servings is None:
+            return meal_diners(session, meal) if kids is None else (household_size(session), kids)
+        return servings, kids or 0
     end = start + dt.timedelta(days=days - 1)
     existing = session.exec(
         select(MenuEntry).where(MenuEntry.day >= start, MenuEntry.day <= end)
@@ -385,6 +407,8 @@ def autoplan(
         for meal in meal_types:
             if (day, meal) in taken:
                 continue
+            adults, children = diners(meal)
+            eaten = portions(session, adults, children)
             options = suggest(
                 session, meal_type=meal, servings=eaten, pantry=pantry,
                 avoid=used, today=day, limit=1,
@@ -392,7 +416,7 @@ def autoplan(
             if not options:
                 continue
             recipe = session.get(Recipe, options[0]["recipe"]["id"])
-            entry = MenuEntry(day=day, meal_type=meal, recipe_id=recipe.id, servings=servings, kids=kids)
+            entry = MenuEntry(day=day, meal_type=meal, recipe_id=recipe.id, servings=adults, kids=children)
             session.add(entry)
             created.append(entry)
             used[recipe.id] = used.get(recipe.id, 0) + 1

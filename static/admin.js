@@ -798,6 +798,12 @@ async function renderHouse() {
             .map(([v, t]) => `<option value="${v}" ${v === portion ? "selected" : ""}>${t}</option>`).join("")}</select></label>
         </div>
         <p class="muted small" style="margin:0">Con esto se calculan las cantidades del menú y de las recetas. Cada comida se puede cambiar aparte.</p>
+        ${members.length ? `<div class="stack" style="border-top:1px dashed var(--line);padding-top:.75rem;gap:.6rem">
+          <p class="small" style="margin:0"><b>¿Alguna comida es solo de algunos?</b> <span class="muted">Sin marcar a nadie, come toda la casa.</span></p>
+          ${META.meal_types.map((meal) => `<div class="field">${esc(cap(meal))}
+            <div class="seg" data-meal-people="${meal}">${members.map((m) => `
+              <label><input type="checkbox" value="${m.id}" ${(META.meal_people[meal] ?? []).includes(m.id) ? "checked" : ""}><span>${esc(m.name)}</span></label>`).join("")}</div></div>`).join("")}
+        </div>` : ""}
       </section>
       <section class="card stack">
         <h2>La casa</h2>
@@ -879,6 +885,14 @@ async function renderHouse() {
     Object.assign(META, res);
     setHouse(META);
     toast(`En casa comen ${peopleText(adults, kids)}`);
+  })));
+  $$("[data-meal-people] input", view).forEach((inp) => inp.addEventListener("change", () => safe(async () => {
+    const meal = inp.closest("[data-meal-people]").dataset.mealPeople;
+    const ids = $$(`[data-meal-people="${meal}"] input:checked`, view).map((i) => +i.value);
+    const res = await api("/api/settings", { method: "PUT", json: { meal_people: { ...META.meal_people, [meal]: ids } } });
+    META.meal_people = res.meal_people;
+    const who = ids.map((id) => members.find((m) => m.id === id)?.name).filter(Boolean);
+    toast(who.length ? `${cap(meal)}: solo ${who.join(" y ")}` : `${cap(meal)}: toda la casa`);
   })));
   const vp = getVoicePrefs();
   $("#v-on").checked = vp.on;

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import io
+import json
 import secrets
 import time
 import uuid
@@ -17,7 +18,7 @@ import segno
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from . import agenda, ai, clock, gcal, household, inventory, prize_icons, rewards, services, storage, taste, vision, voice
+from . import agenda, ai, clock, gcal, household, inventory, planner, prize_icons, rewards, services, storage, taste, vision, voice
 from . import auth
 from .auth import AuthMiddleware, pin_enabled
 from . import db
@@ -230,6 +231,8 @@ class SettingsIn(BaseModel):
     inventory_mode: str | None = None
     ai_photo_model: str | None = Field(None, max_length=80)
     ai_text_model: str | None = Field(None, max_length=80)
+    # Quién come cada comida si no es toda la casa: {"merienda": [id de Benja]}; lista vacía = todos
+    meal_people: dict[str, list[int]] | None = None
 
 
 def _validate_meals(meals: list[str]) -> list[str]:
@@ -285,13 +288,16 @@ def _household(session: Session) -> dict:
         "household_size": services.household_size(session),  # adultos
         "household_kids": services.household_kids(session),
         "kid_portion": services.kid_portion(session),
+        "meal_people": services.meal_people(session),
     }
 
 
-def _servings(session: Session, adults: int | None, kids: int | None) -> tuple[int, int]:
-    """Adultos y niños para una comida; sin datos, los de la casa."""
+def _servings(session: Session, adults: int | None, kids: int | None, meal: str | None = None) -> tuple[int, int]:
+    """Adultos y niños para una comida; sin datos, los que comen esa comida (o la casa completa)."""
     if adults is None:
-        return services.household_size(session), services.household_kids(session) if kids is None else kids
+        if kids is None:
+            return services.meal_diners(session, meal)
+        return services.household_size(session), kids
     if adults + (kids or 0) < 1:
         raise HTTPException(422, "Tiene que comer al menos una persona.")
     return adults, kids or 0
@@ -354,6 +360,13 @@ def update_settings(data: SettingsIn, session: Session = SessionDep):
             if value and not ai.MODEL_NAME.match(value):
                 raise HTTPException(422, "Ese nombre de modelo no es válido.")
             session.merge(Setting(key=ai.ROLES[role]["setting"], value=value))
+    if data.meal_people is not None:
+        _validate_meals(list(data.meal_people))
+        ids = {m.id for m in session.exec(select(Member))}
+        clean = {meal: sorted(set(p)) for meal, p in data.meal_people.items() if p}
+        if any(i not in ids for p in clean.values() for i in p):
+            raise HTTPException(422, "Esa persona no está en la casa.")
+        session.merge(Setting(key="meal_people", value=json.dumps(clean)))
     if data.inventory_mode is not None:
         if data.inventory_mode not in services.INVENTORY_MODES:
             raise HTTPException(422, "Modo de inventario desconocido.")
@@ -734,7 +747,7 @@ def suggestions(
     session: Session = SessionDep,
 ):
     """day = el día que se está planeando (para decir hace cuánto estuvo cada receta en el menú)."""
-    adults, kids = _servings(session, servings, kids)
+    adults, kids = _servings(session, servings, kids, meal_type)
     return services.suggest(session, meal_type, services.portions(session, adults, kids), dish_type,
                             today=day, limit=limit)
 
@@ -765,7 +778,7 @@ def get_menu(start: dt.date, days: int = 7, session: Session = SessionDep):
 def add_menu(data: MenuIn, session: Session = SessionDep):
     _validate_meals([data.meal_type])
     _get_recipe(session, data.recipe_id)
-    adults, kids = _servings(session, data.servings, data.kids)
+    adults, kids = _servings(session, data.servings, data.kids, data.meal_type)
     entry = MenuEntry(day=data.day, meal_type=data.meal_type, recipe_id=data.recipe_id,
                       servings=adults, kids=kids)
     session.add(entry)
@@ -807,6 +820,62 @@ def menu_autoplan(data: AutoplanIn, session: Session = SessionDep):
         session, data.start, data.days, _validate_meals(data.meal_types),
         data.servings, data.overwrite, kids=data.kids,
     )
+    session.commit()
+    for e in created:
+        session.refresh(e)
+    return [_menu_out(e) for e in created]
+
+
+class PlanSlot(BaseModel):
+    day: dt.date
+    meal: str
+    servings: int | None = Field(None, ge=0)  # adultos, si ese día cambia
+    kids: int | None = Field(None, ge=0)
+
+
+class PlanIn(BaseModel):
+    start: dt.date
+    slots: list[PlanSlot] = Field(min_length=1, max_length=4 * 14)
+    keep_existing: bool = True
+
+
+@app.post("/api/menu/plan")
+def menu_plan(data: PlanIn, session: Session = SessionDep):
+    """Menú del domingo: propone la semana con lo que hay (no guarda nada)."""
+    _validate_meals([s.meal for s in data.slots])
+    people = {}
+    for s in data.slots:
+        if s.servings is not None or s.kids is not None:
+            people[(s.day, s.meal)] = _servings(session, s.servings, s.kids, s.meal)
+    return planner.plan_week(session, data.start, [(s.day, s.meal) for s in data.slots], people,
+                             keep_existing=data.keep_existing)
+
+
+class WeekEntryIn(BaseModel):
+    day: dt.date
+    meal_type: str
+    recipe_id: int
+    servings: int | None = Field(None, ge=0)
+    kids: int | None = Field(None, ge=0)
+
+
+class WeekIn(BaseModel):
+    entries: list[WeekEntryIn] = Field(max_length=4 * 14 * 3)
+    # Comidas que se rehacen: lo que tenían sin cocinar se quita antes de guardar
+    replace: list[PlanSlot] = Field(default_factory=list, max_length=4 * 14)
+
+
+@app.post("/api/menu/week", status_code=201)
+def save_menu_week(data: WeekIn, session: Session = SessionDep):
+    """Guarda de una vez la semana que aprobó la familia."""
+    _validate_meals([e.meal_type for e in data.entries] + [s.meal for s in data.replace])
+    items = []
+    for e in data.entries:
+        _get_recipe(session, e.recipe_id)
+        adults, kids = _servings(session, e.servings, e.kids, e.meal_type)
+        items.append({"day": e.day, "meal_type": e.meal_type, "recipe_id": e.recipe_id,
+                      "servings": adults, "kids": kids})
+    created = planner.save_week(session, items, [(s.day, s.meal) for s in data.replace])
     session.commit()
     for e in created:
         session.refresh(e)
@@ -1106,6 +1175,8 @@ def delete_member(member_id: int, session: Session = SessionDep):
             c.last_done_by = None
     for e in session.exec(select(Event).where(Event.member_id == member_id)):
         e.member_id = None  # la cita queda, sin persona
+    people = {meal: [i for i in ids if i != member_id] for meal, ids in services.meal_people(session).items()}
+    session.merge(Setting(key="meal_people", value=json.dumps({m: ids for m, ids in people.items() if ids})))
     for prize in rewards.prizes_of(session, member):
         _drop_prize_photo(prize)
     rewards.forget_member(session, member_id)
