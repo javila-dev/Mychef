@@ -8,3 +8,4 @@ segno>=1.6
 minio>=7.2
 tzdata>=2024.1
 psycopg[binary]>=3.2
+google-auth[requests]>=2.30  # calendario de Google (opcional)

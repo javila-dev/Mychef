@@ -17,7 +17,7 @@ import segno
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from . import agenda, ai, clock, household, inventory, services, storage, vision, voice
+from . import agenda, ai, clock, gcal, household, inventory, prize_icons, rewards, services, storage, vision, voice
 from .auth import AuthMiddleware, check_pin, pin_enabled
 from . import db
 from .db import get_session, init_db
@@ -35,6 +35,7 @@ from .models import (
     ShoppingExtra,
     MenuEntry,
     PantryItem,
+    Prize,
     Recipe,
     Setting,
     utcnow,
@@ -111,6 +112,13 @@ class ReviewIn(BaseModel):
 class MemberIn(BaseModel):
     name: str = Field(min_length=1, max_length=40)
     emoji: str = Field("🙂", max_length=8)
+    kid: bool | None = None  # None = no cambia
+
+
+class PrizeIn(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    stars: int = Field(ge=1, le=500)  # en qué estrella del camino se gana
+    icon: str = Field("", max_length=80)  # "fluent-emoji-flat:ice-cream"; vacío = se queda la imagen que tiene
 
 
 class ChoreIn(BaseModel):
@@ -123,9 +131,12 @@ class ChoreIn(BaseModel):
     weekdays: list[int] = Field(default_factory=list)  # 0 = lunes … 6 = domingo
     month_day: int | None = Field(None, ge=1, le=31)
     remind_at: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    stars: int | None = Field(None, ge=1, le=5)  # None = no cambia (nueva: 1)
 
     def to_fields(self) -> dict:
         data = self.model_dump()
+        if data["stars"] is None:
+            del data["stars"]
         days = sorted({d for d in self.weekdays if 0 <= d <= 6})
         if self.schedule == "weekdays" and not days:
             raise HTTPException(422, "Elijan al menos un día de la semana.")
@@ -296,6 +307,10 @@ def meta(session: Session = SessionDep):
         "inventory_mode": services.inventory_mode(session),
         "ai": _ai_status(session),
         "chore_emojis": CHORE_EMOJIS,
+        "prizes": [{"icon": i, "name": n, "url": prize_icons.bundled_url(i)} for i, n in prize_icons.PRIZES],
+        # Los grupos de la despensa como los piensa la casa (los mismos de «¿Qué hay?» en la tablet)
+        "inventory_groups": [{"key": k, "label": label, "icon": ic, "categories": cats}
+                             for k, label, ic, cats in inventory.GROUPS],
     }
 
 
@@ -671,10 +686,13 @@ def suggestions(
     servings: int | None = None,
     limit: int = 10,
     kids: int | None = None,
+    day: dt.date | None = None,
     session: Session = SessionDep,
 ):
+    """day = el día que se está planeando (para decir hace cuánto estuvo cada receta en el menú)."""
     adults, kids = _servings(session, servings, kids)
-    return services.suggest(session, meal_type, services.portions(session, adults, kids), dish_type, limit=limit)
+    return services.suggest(session, meal_type, services.portions(session, adults, kids), dish_type,
+                            today=day, limit=limit)
 
 
 # ---------------------------------------------------------------- menú
@@ -998,7 +1016,9 @@ def voice_command(data: VoiceIn, session: Session = SessionDep):
 @app.get("/api/today")
 def today(session: Session = SessionDep):
     data = household.today_summary(session)
-    data["agenda"] = agenda.upcoming(session, 7)[:4]
+    # En el inicio solo lo que viene: lo que ya pasó se ve (y se marca) en la Agenda
+    today_iso = clock.today().isoformat()
+    data["agenda"] = [e for e in agenda.upcoming(session, 7) if e["date"] >= today_iso][:8]
     data["inventory"] = inventory.last_review(session)
     return data
 
@@ -1010,7 +1030,7 @@ def list_members(session: Session = SessionDep):
 
 @app.post("/api/members", status_code=201)
 def add_member(data: MemberIn, session: Session = SessionDep):
-    member = Member(**data.model_dump())
+    member = Member(**data.model_dump(exclude_none=True))
     session.add(member)
     session.commit()
     session.refresh(member)
@@ -1023,6 +1043,8 @@ def update_member(member_id: int, data: MemberIn, session: Session = SessionDep)
     if not member:
         raise HTTPException(404, "Persona no encontrada")
     member.name, member.emoji = data.name, data.emoji
+    if data.kid is not None:
+        member.kid = data.kid
     session.commit()
     session.refresh(member)
     return member
@@ -1040,6 +1062,9 @@ def delete_member(member_id: int, session: Session = SessionDep):
             c.last_done_by = None
     for e in session.exec(select(Event).where(Event.member_id == member_id)):
         e.member_id = None  # la cita queda, sin persona
+    for prize in rewards.prizes_of(session, member):
+        _drop_prize_photo(prize)
+    rewards.forget_member(session, member_id)
     session.delete(member)
     session.commit()
 
@@ -1087,11 +1112,194 @@ def update_chore(chore_id: int, data: ChoreIn, session: Session = SessionDep):
     return chore
 
 
+# ---------------------------------------------------------------- logros de los niños
+
+def _get_kid(session: Session, member_id: int) -> Member:
+    member = session.get(Member, member_id)
+    if not member:
+        raise HTTPException(404, "Persona no encontrada")
+    return member
+
+
+@app.get("/api/kids")
+def kids_achievements(session: Session = SessionDep):
+    """Estrellas, meta, racha, insignias y tareas de hoy de cada niño de la casa."""
+    return rewards.all_summaries(session)
+
+
+@app.get("/api/kids/{member_id}")
+def kid_achievements(member_id: int, session: Session = SessionDep):
+    return rewards.summary(session, _get_kid(session, member_id))
+
+
+def _get_prize(session: Session, member: Member, prize_id: int) -> Prize:
+    prize = session.get(Prize, prize_id)
+    if not prize or prize.member_id != member.id:
+        raise HTTPException(404, "Ese premio no está")
+    return prize
+
+
+def _check_prize_stars(session: Session, member: Member, stars: int, prize_id: int | None = None) -> None:
+    for p in rewards.prizes_of(session, member):
+        if p.stars == stars and p.id != prize_id:
+            raise HTTPException(422, f"Ya hay un premio en la estrella {stars}: «{p.name}». Elijan otro número.")
+
+
+@app.post("/api/kids/{member_id}/prizes", status_code=201)
+def add_prize(member_id: int, data: PrizeIn, session: Session = SessionDep):
+    """Un premio más en el camino: «a las 15 estrellas, ir al parque»."""
+    member = _get_kid(session, member_id)
+    _check_prize_stars(session, member, data.stars)
+    prize = Prize(member_id=member.id, name=data.name.strip(), stars=data.stars)
+    session.add(prize)
+    session.flush()
+    if data.icon:
+        _set_prize_icon(prize, data.icon)
+    session.commit()
+    return rewards.summary(session, member)
+
+
+@app.put("/api/kids/{member_id}/prizes/{prize_id}")
+def update_prize(member_id: int, prize_id: int, data: PrizeIn, session: Session = SessionDep):
+    member = _get_kid(session, member_id)
+    prize = _get_prize(session, member, prize_id)
+    _check_prize_stars(session, member, data.stars, prize.id)
+    prize.name, prize.stars = data.name.strip(), data.stars
+    if data.icon:  # sin ícono se queda la imagen que tiene (por ejemplo su foto)
+        _set_prize_icon(prize, data.icon)
+    session.commit()
+    return rewards.summary(session, member)
+
+
+@app.delete("/api/kids/{member_id}/prizes/{prize_id}")
+def delete_prize(member_id: int, prize_id: int, session: Session = SessionDep):
+    member = _get_kid(session, member_id)
+    prize = _get_prize(session, member, prize_id)
+    _drop_prize_photo(prize)
+    session.delete(prize)
+    session.commit()
+    return rewards.summary(session, member)
+
+
+def _set_prize_icon(prize: Prize, icon_id: str) -> None:
+    """Un ícono a color reemplaza la foto. Si no viene con la app, se descarga y se guarda en la casa."""
+    if icon_id in rewards.LEGACY_ICONS:
+        icon_id = f"fluent-emoji-flat:{rewards.LEGACY_ICONS[icon_id]}"
+    if not prize_icons.ICON_ID.match(icon_id):
+        raise HTTPException(422, "Ese dibujo no existe.")
+    if icon_id == prize.icon and (prize.photo.endswith(".svg") or prize_icons.bundled_path(icon_id)):
+        return  # ya es ese
+    if prize_icons.bundled_path(icon_id):
+        _drop_prize_photo(prize)
+    else:
+        try:
+            svg = prize_icons.download(icon_id)
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
+        except OSError as e:
+            raise HTTPException(502, "No se pudo bajar el dibujo. Revisen el internet o elijan uno de los que trae la app.") from e
+        name = f"premio-{uuid.uuid4().hex}.svg"
+        try:
+            storage.photos().save(name, svg, "image/svg+xml")
+        except storage.StorageError as e:
+            raise HTTPException(502, str(e)) from e
+        _drop_prize_photo(prize)
+        prize.photo = name
+    prize.icon = icon_id
+
+
+@app.get("/api/prize-icons")
+def search_prize_icons(q: str = ""):
+    """Buscar dibujos a color para un premio (en español o inglés). Necesita internet."""
+    q = q.strip()[:60]
+    if not q:
+        return {"query": "", "icons": []}
+    try:
+        found = prize_icons.search(q)
+    except (OSError, ValueError) as e:
+        raise HTTPException(502, "Sin internet no se puede buscar. Elijan uno de los dibujos de la app.") from e
+    return {"query": prize_icons.translate(q),
+            "icons": [{"icon": i, "url": prize_icons.bundled_url(i) or prize_icons.preview_url(i)} for i in found]}
+
+
+def _drop_prize_photo(prize: Prize) -> None:
+    if prize.photo:
+        try:
+            storage.photos().delete(prize.photo)
+        except storage.StorageError:
+            pass  # si no se pudo borrar el archivo, igual deja de mostrarse
+        prize.photo = ""
+
+
+@app.post("/api/kids/{member_id}/prizes/{prize_id}/photo")
+async def set_prize_photo(member_id: int, prize_id: int, photo: UploadFile = File(...), session: Session = SessionDep):
+    """Foto del premio de verdad (el helado, el parque): la ven los niños que aún no leen."""
+    member = _get_kid(session, member_id)
+    prize = _get_prize(session, member, prize_id)
+    ext = PHOTO_TYPES.get(photo.content_type or "")
+    if not ext:
+        raise HTTPException(400, "Esa foto no se puede usar. Prueben con una JPG o PNG.")
+    data = await photo.read()
+    if len(data) > MAX_PHOTO_BYTES:
+        raise HTTPException(400, "La foto es muy pesada (más de 8 MB).")
+    name = f"premio-{uuid.uuid4().hex}{ext}"
+    try:
+        storage.photos().save(name, data, photo.content_type or "image/jpeg")
+    except storage.StorageError as e:
+        raise HTTPException(502, str(e)) from e
+    _drop_prize_photo(prize)
+    prize.photo, prize.icon = name, ""
+    session.commit()
+    return rewards.summary(session, member)
+
+
+@app.get("/api/kids/{member_id}/prizes/{prize_id}/photo", include_in_schema=False)
+def prize_photo(member_id: int, prize_id: int, session: Session = SessionDep):
+    prize = session.get(Prize, prize_id)
+    try:
+        data = storage.photos().read(prize.photo) if prize and prize.member_id == member_id and prize.photo else None
+    except storage.StorageError as e:
+        raise HTTPException(502, str(e)) from e
+    if data is None:
+        raise HTTPException(404, "Foto no encontrada")
+    ext = prize.photo.rsplit(".", 1)[-1].lower()
+    media = {"png": "image/png", "webp": "image/webp", "svg": "image/svg+xml"}.get(ext, "image/jpeg")
+    # Un SVG abierto directo no puede ejecutar nada (igual se revisa al bajarlo)
+    return Response(data, media_type=media, headers={
+        "Cache-Control": "private, max-age=31536000, immutable",
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+    })
+
+
+@app.post("/api/kids/{member_id}/claim")
+def claim_reward(member_id: int, session: Session = SessionDep):
+    """Entregar el próximo premio al que ya llegó. No gasta estrellas: el camino sigue."""
+    member = _get_kid(session, member_id)
+    data = rewards.summary(session, member)
+    if not data["goal"]:
+        raise HTTPException(422, "Primero pongan un premio en el camino.")
+    if not data["goal"]["ready"]:
+        raise HTTPException(422, f"Todavía faltan {data['goal']['stars'] - data['stars']} estrellas.")
+    rewards.claim(session, member)
+    session.commit()
+    return rewards.summary(session, member)
+
+
+@app.post("/api/kids/{member_id}/claim/undo")
+def undo_claim(member_id: int, session: Session = SessionDep):
+    member = _get_kid(session, member_id)
+    if rewards.undo_claim(session, member):
+        session.commit()
+    return rewards.summary(session, member)
+
+
 @app.get("/api/reminders")
 def chore_reminders(session: Session = SessionDep):
     """Lo que la tablet debe recordar en voz alta hoy, con la hora de la casa."""
     now = clock.now()
     items = household.reminders(session) + agenda.alerts(session, now.replace(tzinfo=None))
+    if gcal.enabled(session):
+        gcal.sync_soon(session.get_bind())  # la tablet pregunta cada minuto: de paso se trae lo de Google
     return {"now": now.strftime("%H:%M"), "today": now.date().isoformat(), "items": items}
 
 
@@ -1103,6 +1311,8 @@ class EventIn(BaseModel):
     member_id: int | None = None
     day: dt.date
     time: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    end_day: dt.date | None = None
+    end_time: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     notes: str = Field("", max_length=300)
     repeat: Literal["none", "weekly", "monthly", "yearly"] = "none"
     remind: list[int] = Field(default_factory=lambda: [60])
@@ -1111,6 +1321,10 @@ class EventIn(BaseModel):
         data = self.model_dump()
         data["title"] = self.title.strip()
         data["remind"] = ",".join(str(m) for m in sorted({m for m in self.remind if 0 <= m <= 10080}))
+        if self.end_day and self.end_day <= self.day:
+            data["end_day"] = None
+        if not self.time or (not data["end_day"] and self.end_time and self.end_time <= self.time):
+            data["end_time"] = None
         return data
 
 
@@ -1122,8 +1336,22 @@ def _get_event(session: Session, event_id: int) -> Event:
 
 
 @app.get("/api/events")
-def list_events(days: int = 60, session: Session = SessionDep):
+def list_events(days: int = 60, start: dt.date | None = None, end: dt.date | None = None,
+                session: Session = SessionDep):
+    """Lo que viene (para la lista), o todo lo que cae entre start y end (para el calendario)."""
+    if gcal.enabled(session):
+        gcal.sync_soon(session.get_bind())
+    if start and end:
+        if end < start or (end - start).days > 62:
+            raise HTTPException(422, "Pidan de a un mes como mucho.")
+        return agenda.between(session, start, end)
     return agenda.upcoming(session, min(max(days, 1), 400))
+
+
+def _changed(session: Session) -> None:
+    """Algo cambió en la agenda: si hay calendario de Google, se sube ya."""
+    if gcal.enabled(session):
+        gcal.sync_soon(session.get_bind(), force=True)
 
 
 @app.post("/api/events", status_code=201)
@@ -1133,6 +1361,7 @@ def add_event(data: EventIn, session: Session = SessionDep):
     session.add(event)
     session.commit()
     session.refresh(event)
+    _changed(session)
     return agenda.event_out(event, event.day, {m.id: m for m in session.exec(select(Member))}, clock.today())
 
 
@@ -1142,7 +1371,9 @@ def update_event(event_id: int, data: EventIn, session: Session = SessionDep):
     _check_member(session, data.member_id)
     for k, v in data.to_fields().items():
         setattr(event, k, v)
+    gcal.touched(event)
     session.commit()
+    _changed(session)
     return {"ok": True}
 
 
@@ -1167,8 +1398,47 @@ def event_undone(event_id: int, session: Session = SessionDep):
 def delete_event(event_id: int, session: Session = SessionDep):
     event = session.get(Event, event_id)
     if event:
+        gcal.forget(session, event)
         session.delete(event)
         session.commit()
+        _changed(session)
+
+
+# ---------------------------------------------------------------- calendario de Google
+
+class GCalIn(BaseModel):
+    calendar_id: str = Field(min_length=3, max_length=200)
+
+
+def _gcal_error(e: gcal.GCalError) -> HTTPException:
+    return HTTPException(e.status if e.status < 500 else 502, str(e))
+
+
+@app.get("/api/gcal")
+def gcal_status(session: Session = SessionDep):
+    return gcal.status(session)
+
+
+@app.put("/api/gcal")
+def gcal_connect(data: GCalIn, session: Session = SessionDep):
+    try:
+        return gcal.connect(session, data.calendar_id)
+    except gcal.GCalError as e:
+        raise _gcal_error(e) from e
+
+
+@app.post("/api/gcal/sync")
+def gcal_sync(session: Session = SessionDep):
+    try:
+        return {**gcal.sync(session), **gcal.status(session)}
+    except gcal.GCalError as e:
+        raise _gcal_error(e) from e
+
+
+@app.delete("/api/gcal")
+def gcal_disconnect(session: Session = SessionDep):
+    gcal.disconnect(session)
+    return gcal.status(session)
 
 
 @app.delete("/api/chores/{chore_id}", status_code=204)

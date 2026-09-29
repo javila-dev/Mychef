@@ -22,6 +22,17 @@ pocas palabras, siempre un **← Volver**, y si nadie la toca por 2 minutos vuel
   Cada tarea tiene su horario de calendario: **días de la semana** («los lunes y jueves», cuando pasa el
   camión), **cada ciertos días** o **un día del mes** («el 1 de cada mes»; si el mes es más corto, el último día).
   Si nadie la hace, sigue apareciendo como atrasada hasta que se marque.
+- **Logros de los niños** (Tareas → Logros): a quien se marque como niño o niña, cada tarea le da estrellas
+  (1, 2 o 3 según lo grande que sea) y lo celebra con confeti, sonido y la tablet diciéndolo en voz alta.
+  Juntan estrellas para un **premio pactado** con los papás (mejor experiencias: ir al parque, elegir la
+  película), llenan su **semana de stickers**, suben de nivel y ganan **insignias**. Nunca se quitan estrellas
+  por no hacer algo; la racha perdona un día de descanso. Poner el premio y canjearlo pide una cuenta de adulto.
+- **Premios** (Administrar → Premios, o en la tablet desde Logros): varios premios en **un mismo camino de
+  estrellas** (a las 10 un helado, a las 15 el parque, a las 20 la bici). Al llegar a uno, un adulto lo entrega y
+  el niño sigue hacia el próximo; entregar no gasta estrellas y al entregar el último empieza otra vuelta. Cada
+  premio lleva un **ícono a color** o una **foto** para los niños que aún no leen. Trae 24 íconos
+  incluidos (Fluent Emoji, MIT) y un buscador en español que consulta Fluent y Noto Emoji por internet (Iconify);
+  el ícono elegido se guarda en la casa, así que la tablet lo sigue mostrando sin internet.
 - **Recordatorio en voz alta**: a la hora que se le ponga a una tarea (p. ej. 7:30 p. m.), si nadie la ha
   hecho, la tablet suena y dice «Recordatorio: sacar la basura. Hoy le toca a Papá.». Se responde
   **Ya la hicimos**, **En 30 minutos** o **Hoy no**. Solo avisa la pantalla de la casa (no el celular), y si
@@ -35,6 +46,10 @@ pocas palabras, siempre un **← Volver**, y si nadie la toca por 2 minutos vuel
   agenda que mañana Benja lleva el uniforme de educación física», «recuérdame pagar el arriendo el 5
   cada mes», «¿qué hay en la agenda?». La frase se entiende en la casa; si es muy enredada y hay clave de
   OpenAI, la IA ayuda. Lo que no se repite se marca ✓ cuando ya pasó.
+  Se ve como un **calendario**: el mes (con los eventos de cada día y el día elegido al lado), la semana
+  o la lista de lo que viene; se desliza el dedo para cambiar de mes. Lo que dura varios días (un viaje)
+  se ve en todos sus días. Si se conecta el **calendario de Google** que la familia ya comparte, lo que
+  se anota en el celular aparece en la tablet (y se avisa en voz alta), y al revés (ver abajo).
 - **🧾 Escanear → La factura**: foto de la factura del mercado (si es larga, en varias fotos). La IA entiende
   los nombres abreviados ("LCHE ALQ 1100ML X2" → Leche, 2200 ml), separa comida de aseo, y se revisa con
   un toque antes de guardar. Todo queda en el inventario y se registra cuánto se gastó.
@@ -80,7 +95,8 @@ modos, solo pide algo cuando falta más de una cuarta parte.
 | **Recetas** | Sus recetas con cantidades exactas, escalables a N porciones. **📷 Importar receta escrita** convierte la foto del cuaderno en receta. |
 | **Despensa** | Inventario con vencimientos, **mínimo** (si baja de ahí pasa sola a la lista) y equivalencias ⚖ ("1 taza de arroz = 200 g"). |
 | **Compras** | La lista completa de la semana, para copiar o pasar a la despensa. |
-| **Casa y tareas** | Personas de la casa, tareas (días de la semana, cada N días o un día del mes; persona fija, cualquiera o por turnos; hora del recordatorio en voz alta), cuántas tareas hizo cada uno y **gastos del mes** según las facturas. |
+| **Tareas** | Tareas del hogar: días de la semana, cada N días o un día del mes; persona fija, cualquiera o por turnos; hora del recordatorio en voz alta. También se agregan y cambian desde la tablet. |
+| **Casa** | Personas de la casa, cuántas tareas hizo cada uno, voz, «Oye casa», IA y **gastos del mes** según las facturas. |
 
 ## Cómo correrla
 
@@ -153,6 +169,33 @@ python -m app.storage     # una vez: sube a MinIO las fotos que ya estaban en da
 Las fotos siempre pasan por la app (`/api/photos/{id}/file`), así el bucket no necesita ser público y el
 PIN de la casa las sigue protegiendo. Con PostgreSQL + MinIO, el contenedor de la app no guarda nada en disco.
 
+### La agenda con el calendario de Google de la familia (opcional)
+
+La agenda se sincroniza en los dos sentidos con un calendario de Google (el que la familia ya comparte).
+Se usa una **cuenta de servicio**: no hay que iniciar sesión con Google en la tablet.
+
+1. En [Google Cloud](https://console.cloud.google.com/): creen un proyecto, activen **Google Calendar API**,
+   creen una **cuenta de servicio** (IAM → Cuentas de servicio) y descárguenle una **clave JSON**.
+2. Guarden el archivo (p. ej. `data/google.json`) y díganle a la app dónde está:
+   ```bash
+   export MYCHEF_GOOGLE_CREDENTIALS=data/google.json   # también sirve el JSON pegado
+   ```
+   Con Docker no hace falta la variable: basta con dejar el archivo en `data/google.json`.
+3. En **Administrar → Casa → Calendario de Google** aparece el correo de la cuenta de servicio. En Google
+   Calendar, compartan el calendario de la familia con ese correo con permiso **Hacer cambios en los eventos**,
+   copien el **ID del calendario** (Configuración → Integrar el calendario) y péguenlo ahí. Listo.
+
+Cómo funciona:
+- Se sincroniza sola cada 5 minutos mientras la tablet está prendida, y al momento cuando se anota, cambia
+  o borra algo en la tablet (o por voz). En la agenda está el botón para sincronizar ya.
+- Lo que viene de Google sin categoría ni persona se adivina por el título («Cita de Benja con la pediatra»
+  → Salud, Benja) y se avisa en voz alta como lo que se anota en la tablet. Lo que se anota en la tablet
+  guarda su categoría, persona y avisos dentro del evento de Google, así no se pierden.
+- Lo que se repite de formas que la agenda no maneja (cada 2 semanas, lunes y miércoles…) llega como fechas
+  sueltas: cambiar una de esas en la tablet cambia solo ese día. Las series completas se cambian en Google.
+- Si lo cambian al mismo tiempo en los dos lados, gana lo de la tablet. «Listo / ya pasó» es solo de la tablet.
+- Se trae desde un mes atrás hasta un año adelante. Desconectar no borra nada, ni aquí ni en Google.
+
 ### Probar en local con PostgreSQL y MinIO
 
 `docker-compose.dev.yml` levanta la app junto con un PostgreSQL y un MinIO propios, ya conectados:
@@ -208,7 +251,7 @@ tablet lee cada paso en voz alta; si le hablan encima, se calla y obedece.
 Los temporizadores aparecen arriba en todas las pantallas y, al terminar, suenan y lo dicen en voz alta.
 
 **La voz que contesta**: la tablet responde con las voces en español que trae instaladas. En
-**Ajustes → Casa y tareas → Voz de esta tablet** se elige cuál (y se escucha con **Probar**), la velocidad
+**Ajustes → Casa → Voz de esta tablet** se elige cuál (y se escucha con **Probar**), la velocidad
 (despacio, normal, más rápido) y si contesta en voz alta o solo por escrito. Se guarda en cada aparato,
 así que conviene hacerlo desde la misma tablet de la nevera. Las alarmas de los temporizadores siempre suenan
 y hablan, aunque la voz esté apagada. Para voces más naturales en Android: *Ajustes → Sistema → Idiomas →
@@ -221,7 +264,7 @@ dejar la tablet escuchando sin tocarla (el punto verde parpadea mientras está a
 - en dos partes: «Oye casa» → suena un tono → «¿qué hay de almuerzo?» (espera unos 8 segundos).
 
 Se activa **en cada tablet por separado** y la tablet lo recuerda aunque se recargue. La palabra se
-cambia en **Ajustes → Casa y tareas → Palabra de activación** (mejor dos palabras, como «Oye Lupita»).
+cambia en **Ajustes → Casa → Palabra de activación** (mejor dos palabras, como «Oye Lupita»).
 Mientras cocinan en **Manos libres** no hace falta decirla.
 
 Tengan en cuenta:
@@ -263,7 +306,7 @@ export GEMINI_API_KEY=...      # https://aistudio.google.com/apikey
 export OPENAI_API_KEY=sk-...   # https://platform.openai.com/api-keys
 ```
 
-**El modelo de cada uno se elige en Ajustes → Casa y tareas → Inteligencia artificial.** Ahí se ve si la
+**El modelo de cada uno se elige en Ajustes → Casa → Inteligencia artificial.** Ahí se ve si la
 clave está lista, aparece la lista de modelos que su clave puede usar (se puede escribir cualquier otro) y
 el botón **Probar** confirma que funciona. Por defecto: `gemini-2.5-flash` y `gpt-5-mini` (también se
 pueden cambiar con `MYCHEF_PHOTO_MODEL` y `MYCHEF_TEXT_MODEL`).
@@ -303,9 +346,12 @@ app/
   main.py      API (FastAPI) y archivos estáticos
   models.py    Tablas: ingredientes, despensa, recetas, menú, personas, tareas, compras
   household.py Tareas del hogar, facturas, mínimos de inventario y el resumen de "Hoy"
+  rewards.py   Logros de los niños: estrellas, premio, racha, niveles e insignias
+  prize_icons.py Íconos a color de los premios: los incluidos y la búsqueda en Iconify (español → inglés)
   auth.py      PIN opcional de la casa
   clock.py     La hora y el día de la casa (MYCHEF_TZ)
   agenda.py    Agenda familiar: repeticiones, avisos en voz alta y frases como «recuérdame…»
+  gcal.py      Sincronización de la agenda con el calendario de Google (MYCHEF_GOOGLE_CREDENTIALS)
   db.py        SQLite o PostgreSQL (MYCHEF_DATABASE_URL); copy_to_postgres.py pasa los datos
   storage.py   Fotos de la familia en disco o en MinIO / S3 (MYCHEF_S3_*)
   services.py  Escalar recetas, disponibilidad, sugerencias, plan semanal, compras

@@ -146,6 +146,17 @@ class Member(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     emoji: str = "🙂"
+    # Niños: sus tareas dan estrellas y tienen su pantalla de logros (ver app/rewards.py)
+    kid: bool = False
+    # El premio que están juntando, pactado con los papás: «Ir al parque» por 20 estrellas (0 = sin meta)
+    goal_name: str = ""
+    goal_stars: int = 0
+    # Cómo se ve el premio, para los que aún no leen: un ícono a color (app/prize_icons.py) o una foto propia
+    goal_icon: str = ""
+    goal_photo: str = ""  # archivo en el almacenamiento de fotos
+    # (goal_* es del premio único de antes; ahora los premios son una escalera, ver Prize. Se migran solos.)
+    # Estrellas ganadas cuando empezó la vuelta actual del camino de premios: avance = ganadas - round_base
+    round_base: int = 0
 
 
 class Chore(SQLModel, table=True):
@@ -165,6 +176,7 @@ class Chore(SQLModel, table=True):
     # Persona fija, o None = le toca a cualquiera / por turnos si rotate
     member_id: Optional[int] = Field(default=None, foreign_key="member.id")
     rotate: bool = False
+    stars: int = 1  # estrellas que gana un niño al hacerla (1 = fácil, 3 = grande)
     last_done: Optional[dt.date] = None
     last_done_by: Optional[int] = Field(default=None, foreign_key="member.id")
     created_on: dt.date = Field(default_factory=clock.today)
@@ -175,6 +187,32 @@ class ChoreLog(SQLModel, table=True):
     chore_id: int = Field(foreign_key="chore.id", index=True)
     member_id: Optional[int] = Field(default=None, foreign_key="member.id")
     day: dt.date = Field(default_factory=clock.today)
+    stars: int = 1  # las que valía la tarea ese día (si luego cambia, lo ganado no cambia)
+
+
+class Prize(SQLModel, table=True):
+    """Un premio en el camino de estrellas de un niño: se gana al llegar a `stars` (10 → helado, 15 → parque…)."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    member_id: int = Field(foreign_key="member.id", index=True)
+    name: str
+    stars: int  # en qué estrella del camino está
+    icon: str = ""  # "fluent-emoji-flat:ice-cream"
+    photo: str = ""  # archivo propio (foto o ícono bajado de internet)
+    claimed: bool = False  # ya se entregó en esta vuelta
+
+
+class RewardClaim(SQLModel, table=True):
+    """Un premio entregado a un niño (el historial). Entregar no gasta estrellas: el camino sigue."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    member_id: int = Field(foreign_key="member.id", index=True)
+    name: str
+    stars: int
+    day: dt.date = Field(default_factory=clock.today)
+    prize_id: Optional[int] = None
+    # Si con este premio se terminó el camino y empezó otra vuelta: la round_base de antes (para deshacer)
+    reset_from: Optional[int] = None
 
 
 EVENT_CATEGORIES = ["salud", "colegio", "cumpleaños", "pagos", "familia", "otro"]
@@ -190,12 +228,21 @@ class Event(SQLModel, table=True):
     member_id: Optional[int] = Field(default=None, foreign_key="member.id")
     day: dt.date
     time: Optional[str] = None  # "HH:MM"; sin hora = todo el día
+    end_day: Optional[dt.date] = None  # lo que dura varios días (un viaje): último día, incluido
+    end_time: Optional[str] = None  # "HH:MM" a la que termina (si no, se cuenta una hora)
     notes: str = ""
     repeat: str = "none"  # none | weekly | monthly | yearly
+    repeat_until: Optional[dt.date] = None  # se repite hasta este día (incluido)
+    skip_days: str = ""  # días que no cuentan (AAAA-MM-DD separados por coma): se canceló o se movió esa vez
     # Cuándo avisar en voz alta: minutos antes, separados por coma (0 = a la hora, 1440 = el día antes)
     remind: str = "60"
     done_on: Optional[dt.date] = None  # para lo que se "entrega" o se cumple una sola vez
     created_at: dt.datetime = Field(default_factory=utcnow)
+    # Calendario de Google (ver app/gcal.py)
+    google_id: Optional[str] = Field(default=None, index=True)
+    google_series: Optional[str] = None  # si es una sola vez de algo que se repite en Google
+    google_updated: Optional[str] = None  # la última versión que vimos allá
+    sync_dirty: bool = False  # se cambió aquí y falta subirlo
 
 
 class Purchase(SQLModel, table=True):

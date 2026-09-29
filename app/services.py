@@ -249,6 +249,15 @@ def last_cooked(session: Session) -> dict[int, dt.date]:
     return result
 
 
+def last_planned(session: Session, before: dt.date) -> dict[int, dt.date]:
+    """Receta -> último día que estuvo en el menú antes de esa fecha."""
+    result: dict[int, dt.date] = {}
+    for e in session.exec(select(MenuEntry).where(MenuEntry.day < before)):
+        if e.recipe_id not in result or e.day > result[e.recipe_id]:
+            result[e.recipe_id] = e.day
+    return result
+
+
 def suggest(
     session: Session,
     meal_type: str | None = None,
@@ -265,6 +274,7 @@ def suggest(
     servings = servings or portions(session)
     avoid = avoid or {}  # receta -> veces ya planeada en el periodo
     cooked = last_cooked(session)
+    planned = last_planned(session, today)
     expiring = {
         iid for iid, s in pantry.items()
         if s.expires_on and s.quantity > 0 and (s.expires_on - today).days <= EXPIRING_DAYS
@@ -299,6 +309,9 @@ def suggest(
             ],
             "uses_expiring": uses_expiring,
             "last_cooked": last.isoformat() if last else None,
+            # Para no repetir: cuántos días hace que estuvo en el menú (antes del día que se planea)
+            "last_menu": planned[recipe.id].isoformat() if recipe.id in planned else None,
+            "days_since_menu": (today - planned[recipe.id]).days if recipe.id in planned else None,
         })
     ranked.sort(key=lambda r: (-r["score"], r["recipe"]["name"]))
     return ranked[:limit]

@@ -18,6 +18,9 @@ services:
       # - MYCHEF_S3_ACCESS_KEY=...
       # - MYCHEF_S3_SECRET_KEY=...
       # - MYCHEF_S3_BUCKET=mychef
+      # Opcional: agenda sincronizada con el calendario de Google. Basta con poner la clave de la
+      # cuenta de servicio en ./data/google.json (si no está, la agenda funciona sin Google).
+      - MYCHEF_GOOGLE_CREDENTIALS=${MYCHEF_GOOGLE_CREDENTIALS:-/data/google.json}
       # Zona horaria de la casa (para saber qué día es y a qué hora recordar las tareas)
       - MYCHEF_TZ=${MYCHEF_TZ:-America/Bogota}
     volumes:

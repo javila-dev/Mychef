@@ -19,6 +19,9 @@ colors:
   red: "#b3261e"
   red-soft: "#fce4e2"
   alert: "#d93025"
+  star: "#ffd23f"  # relleno de la estrella de los niños (borde: honey-fill)
+  star-ink: "#6b3a00"  # carita de la estrella (fija en claro y oscuro)
+  star-cheek: "#ff7a59"
   # Tonos suaves con nombre (fondo / texto). Modo oscuro en styles.css (--tint-*).
   tint-honey: "#fff0dc"
   tint-honey-ink: "#8a4200"
@@ -182,7 +185,7 @@ Una sola familia, **Lexend** (autoalojada, OFL), elegida por su legibilidad. Esc
 
 ## Layout
 
-Tablet horizontal (1280×800) sin desplazamiento: columna izquierda libre sobre la foto (hora, saludo, fecha y casa, invitación a poner fotos y "Ojo con esto" abajo), columna derecha de 360–440 px con tarjetas ("Hoy en la mesa", "Pendientes de hoy"), y abajo una bandeja de dos filas de 4 botones, solo con ícono y título: Lista de compras, ¿Qué cocino?, ¿Qué falta?, ¿Qué hay?, Tareas (verde, con contador de pendientes), Agenda, Fotos y Ajustes. «Escanear» va junto a «Hablar», al lado de la hora; «Oye casa» se activa en Administrar → Casa y tareas. Las tarjetas se desplazan por dentro si no caben; se muestran máximo 3 tareas.
+Tablet horizontal (1280×800) sin desplazamiento: columna izquierda libre sobre la foto (hora, saludo, fecha y casa, invitación a poner fotos y "Ojo con esto" abajo), columna derecha de 360–440 px con tarjetas ("Hoy en la mesa", "Pendientes de hoy"), y abajo una bandeja de dos filas de 4 botones, solo con ícono y título: Lista de compras, ¿Qué cocino?, ¿Qué falta?, ¿Qué hay?, Tareas (verde, con contador de pendientes), Agenda, Fotos y Ajustes. «Escanear» va junto a «Hablar», al lado de la hora; «Oye casa» se activa en Administrar → Casa. Las tarjetas se desplazan por dentro si no caben; se muestran máximo 3 tareas.
 
 Celular (≤ 760 px): foto arriba (52 vh) con la hora, luego los botones en cuadrícula de 2, luego las tarjetas y al final "Ojo con esto". Pantallas internas: fondo gris, ancho máximo 1180 px, título grande con botón de volver redondo.
 
@@ -197,7 +200,7 @@ Esquinas amplias: 28 px en tarjetas del inicio y ventanas, 24 px en botones de a
 ## Components
 
 - **Tarjeta del inicio**: blanco al 94 % con desenfoque, título con ícono verde.
-- **Hoy en la mesa**: una línea por comida (ícono, plato y estado: ✓, «falta X» / «faltan N» o «ya se cocinó»). La comida que sigue según la hora va resaltada en verde suave y más grande. «Semana ›» arriba a la derecha abre el menú de la semana.
+- **Hoy en la mesa**: una línea por comida (ícono, plato y estado: ✓, «falta X» / «faltan N» o «ya se cocinó»). «Semana ›» arriba a la derecha abre el menú de la semana.
 - **Enlace de tarjeta**: en las tarjetas del inicio, el acceso a la pantalla completa va arriba a la derecha junto al título («Semana ›», «Todas ›», «Agenda ›»), no como botón abajo.
 - **Tarea**: ícono dibujado en círculo verde claro, nombre, "Le toca a" con avatar (inicial en círculo de color por persona) y botón redondo de 56 px para marcar; tocar de nuevo pide confirmar "Deshacer".
 - **Botón de acción**: ícono + nombre, sin explicación (pedido de la familia); contador rojo cuando aplica.

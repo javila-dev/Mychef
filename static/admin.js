@@ -3,7 +3,7 @@
 import {
   $, $$, REASON_TEXT, addDays, api, cap, esc, fmtDay, fmtMoney, fmtQty, isoDate, mondayOf, safe,
   CHORE_ICONS, amountForm, avatar, bindAmountForm, choreIcon, compressImage, confirmModal, fmtAmount, fmtUnit, house,
-  icon, modal as formModal, peopleText, readAmountForm, setHouse, toPantryLine, toast, withBusy,
+  icon, kidPath, kidStar, modal as formModal, peopleText, prizeArt, prizeForm, prizeRows, readAmountForm, setHouse, toPantryLine, toast, withBusy,
   bindSchedule, readSchedule, scheduleFields, scheduleOf,
 } from "./common.js";
 import { VOICE_SUPPORTED, getVoicePrefs, onVoicesReady, setVoicePrefs, speak } from "./voice.js";
@@ -37,7 +37,7 @@ modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); }
 
 // ------------------------------------------------------------------ navegación
 
-const VIEWS = { cook: renderCook, recipes: renderRecipes, pantry: renderPantry, shopping: renderShopping, house: renderHouse };
+const VIEWS = { cook: renderCook, recipes: renderRecipes, pantry: renderPantry, shopping: renderShopping, house: renderHouse, chores: renderChoresAdmin, prizes: renderPrizes };
 let current = "recipes";
 
 function go(name) {
@@ -59,18 +59,6 @@ function readWho(prefix) {
   return adults + kids ? { servings: adults, kids } : { servings: null, kids: null };
 }
 
-$$("#household, #household-kids, #kid-portion").forEach((inp) => inp.addEventListener("change", () => safe(async () => {
-  const adults = parseInt($("#household").value, 10);
-  const kids = parseInt($("#household-kids").value, 10) || 0;
-  if (!adults || adults < 1) return;
-  const res = await api("/api/settings", { method: "PUT", json: {
-    household_size: adults, household_kids: kids, kid_portion: parseFloat($("#kid-portion").value),
-  } });
-  Object.assign(META, res);
-  setHouse(META);
-  toast(`En casa comen ${peopleText(adults, kids)}`);
-  refresh();
-})));
 
 // ------------------------------------------------------------------ ¿qué cocino?
 
@@ -344,145 +332,222 @@ const INVENTORY_MODES = [
   ["exacto", "Exacto", "Cuenta gramo a gramo y no da nada por hecho."],
 ];
 
-async function renderPantry() {
-  const [items, ingredients] = await Promise.all([api("/api/pantry"), api("/api/ingredients")]);
-  const expiring = items.filter((i) => i.expiring);
-  const staples = ingredients.filter((i) => i.is_staple);
-  const mode = META.inventory_mode ?? "normal";
-  view.innerHTML = `
-    <div class="card stack" style="margin-bottom:.75rem">
-      <h2 style="margin:0">¿Qué tan exigente con lo que hay?</h2>
-      <div class="modes">${INVENTORY_MODES.map(([k, label, text]) => `
-        <label class="mode ${k === mode ? "on" : ""}"><input type="radio" name="inv-mode" value="${k}" ${k === mode ? "checked" : ""}>
-          <b>${label}</b><span class="small muted">${text}</span></label>`).join("")}</div>
-      <div ${mode === "exacto" ? "hidden" : ""}>
-        <p class="small" style="margin:.2rem 0 .5rem"><b>Básicos que siempre hay</b> <span class="muted">— no hace falta tenerlos en el inventario
-          ni aparecen en la lista de compras, salvo que digan «se acabó».</span></p>
-        <div class="row" style="gap:.4rem">${staples.map((i) => `
-          <span class="badge ok staple">${esc(i.name)}<button class="ghost" data-unstaple="${i.id}" aria-label="Quitar ${esc(i.name)} de los básicos">${icon("close", 14)}</button></span>`).join("")}
-          <form id="staple-f" class="row" style="gap:.3rem"><input name="n" placeholder="Agregar básico…" style="width:11rem" list="dl-ing-all" autocomplete="off">
-            <button type="submit">${icon("plus", 18)}</button></form></div>
-        <datalist id="dl-ing-all">${ingredients.filter((i) => !i.is_staple).map((i) => `<option value="${esc(i.name)}">`).join("")}</datalist>
-      </div>
-    </div>
-    <div class="card stack" style="margin-bottom:.75rem">
-      <div class="row spread"><h2 style="margin:0">¿Qué hay en casa?</h2>
-        <div class="row"><button id="add-p">${icon("plus", 20)} Agregar</button>
-          <button class="primary" id="scan">${icon("camera", 20)} Reconocer con una foto</button></div></div>
-      <datalist id="dl-units">${META.units.map((u) => `<option value="${u}">`).join("")}</datalist>
-      ${expiring.length ? `<div class="small"><span class="badge warn">Por vencer</span> ${esc(expiring.map((i) => i.name).join(", "))} —
-        <a href="#" id="use-exp">ver qué cocinar</a></div>` : ""}
-    </div>
-    ${items.length ? `<div class="card table-wrap"><table>
-      <thead><tr><th>Ingrediente</th><th style="width:7rem">Cantidad</th><th style="width:6rem">Unidad</th><th style="width:9.5rem">Vence</th><th style="width:6rem" title="Si baja de aquí, pasa sola a la lista de compras">Mínimo</th><th></th></tr></thead>
-      <tbody>${items.map((i, idx) => `
-        ${idx === 0 || items[idx - 1].category !== i.category ? `<tr class="cat"><th colspan="6">${esc(cap(i.category))}</th></tr>` : ""}
-        <tr class="${i.expiring ? "expiring" : ""}" data-id="${i.id}">
-          <td>${esc(i.name)} ${i.unit === "porcion" && i.quantity > 0 ? `<span class="muted small">${esc(fmtAmount(i.quantity, i.unit))}</span>` : ""} ${i.quantity <= 0 ? `<span class="badge bad">agotado</span>` : i.low ? `<span class="badge warn">poco</span>` : ""}</td>
-          <td><input type="number" step="any" min="0" value="${i.quantity}" data-f="quantity"></td>
-          <td><input list="dl-units" value="${esc(i.unit)}" data-f="unit"></td>
-          <td><input type="date" value="${i.expires_on ?? ""}" data-f="expires_on"></td>
-          <td><input type="number" step="any" min="0" value="${i.min_quantity ?? ""}" placeholder="—" data-f="min_quantity"></td>
-          <td class="row" style="flex-wrap:nowrap"><button class="ghost" data-eq="${idx}" title="Equivalencias (cuánto pesa una taza o una unidad)">${icon("sliders", 18)}</button>
-            <button class="ghost danger" data-del="${i.id}" title="Quitar">${icon("close", 18)}</button></td>
-        </tr>`).join("")}</tbody></table></div>`
-      : `<div class="empty card">La despensa está vacía. Agreguen lo que hay a mano o con una foto de la nevera.</div>`}`;
+// Despensa: primero se lee (lo que pide atención y lo que hay, por los grupos de la tablet) y se
+// edita con un toque en una ventana. La configuración (modo y básicos) queda en el botón de ajustes.
+let pantryQuery = "";
 
-  $("#add-p").onclick = () => {
-    const m = formModal({
-      title: "Agregar a la despensa",
-      body: `<form id="pf" class="stack">
-        <label class="field">Ingrediente<input name="name" required autocomplete="off" placeholder="Ej: Leche"></label>
-        <div class="field">¿Cuánto hay?${amountForm(null, null, { withUnit: true, preferPortions: mode === "tranquilo" })}</div>
-        <div class="form-grid">
-          <label class="field">Categoría<select name="category">${options(META.categories, "", "Sin categoría")}</select></label>
-          <label class="field">Vence<input name="expires_on" type="date"></label>
-          <label class="field">Mínimo (opcional)<input name="min_quantity" type="number" step="any" min="0" placeholder="Avisar si baja de…"></label>
-        </div></form>`,
-      actions: [
-        { label: "Cancelar", value: false },
-        { label: "Agregar", tone: "primary", icon: "plus", onClick: async (dlg) => {
-          const f = $("#pf", dlg);
-          if (!f.reportValidity()) return false;
-          return safe(async () => {
-            await api("/api/pantry", { method: "POST", json: {
-              name: f.name.value, ...readAmountForm(dlg, null),
-              category: f.category.value || null, expires_on: f.expires_on.value || null,
-              min_quantity: f.min_quantity.value === "" ? null : parseFloat(f.min_quantity.value),
-            } });
-            toast(`${f.name.value} agregado`);
-            return true;
-          }).then((ok) => ok ?? false);
-        } },
-      ],
-    });
-    bindAmountForm(m.el, null);
-    m.done.then((ok) => ok && renderPantry());
-  };
-  $("#scan").onclick = scanDialog;
-  $$("[name=inv-mode]", view).forEach((r) => r.onchange = () => safe(async () => {
-    const res = await api("/api/settings", { method: "PUT", json: { inventory_mode: r.value } });
-    META.inventory_mode = res.inventory_mode;
-    toast(`Modo ${INVENTORY_MODES.find(([k]) => k === r.value)[1].toLowerCase()}`);
-    renderPantry();
-  }));
-  $$("[data-unstaple]", view).forEach((b) => b.onclick = () => safe(async () => {
-    await api(`/api/ingredients/${b.dataset.unstaple}`, { method: "PATCH", json: { staple: false } });
-    renderPantry();
-  }));
-  $("#staple-f").onsubmit = (e) => {
-    e.preventDefault();
-    const name = e.target.n.value.trim();
-    if (name) safe(async () => { await api("/api/staples", { method: "POST", json: { name } }); renderPantry(); });
-  };
-  $("#use-exp")?.addEventListener("click", (e) => { e.preventDefault(); go("cook"); });
-  $$("tr[data-id] input", view).forEach((inp) => inp.onchange = () => safe(async () => {
-    const id = inp.closest("tr").dataset.id;
-    const f = inp.dataset.f;
-    let v = inp.value;
-    if (f === "quantity") v = parseFloat(v) || 0;
-    if (f === "expires_on") v = v || null;
-    if (f === "min_quantity") v = v === "" ? null : parseFloat(v);
-    await api(`/api/pantry/${id}`, { method: "PATCH", json: { [f]: v } });
-    toast("Actualizado");
-  }));
-  $$("[data-del]", view).forEach((b) => b.onclick = () => safe(async () => {
-    const name = b.closest("tr").querySelector("td").firstChild.textContent.trim();
-    if (!await confirmModal({ title: "¿Quitar de la despensa?", text: `«${esc(name)}» deja de aparecer en el inventario.`, ok: "Quitar", tone: "danger", okIcon: "trash" })) return;
-    await api(`/api/pantry/${b.dataset.del}`, { method: "DELETE" });
-    renderPantry();
-  }));
-  $$("[data-eq]", view).forEach((b) => b.onclick = () => equivalenceDialog(items[+b.dataset.eq]));
+function whenExpires(i) {
+  if (i.days_left == null) return "";
+  const d = i.days_left;
+  return d < 0 ? "ya venció" : d === 0 ? "vence hoy" : d === 1 ? "vence mañana" : d <= 7 ? `vence en ${d} días`
+    : `vence el ${new Date(i.expires_on + "T12:00").toLocaleDateString("es-CO", { day: "numeric", month: "short" })}`;
 }
 
-function equivalenceDialog(item) {
-  openModal(`
-    <div class="modal-head"><h2>${esc(item.name)}</h2><button class="m-x" id="x" aria-label="Cerrar">${icon("close")}</button></div>
-    <p class="muted">Si sus recetas piden este ingrediente en tazas o unidades pero lo compran por peso,
-      digan cuánto pesa para poder comparar y descontar bien.</p>
-    <form id="eqf" class="stack">
-      <label class="field">Categoría<select name="category">${options(META.categories, item.category)}</select></label>
-      <div class="form-grid">
-        <label class="field">1 taza pesa (g)<input name="g_per_cup" type="number" step="any" min="0" value="${item.g_per_cup ?? ""}" placeholder="Ej: arroz 200"></label>
-        <label class="field">1 unidad pesa (g)<input name="g_per_unit" type="number" step="any" min="0" value="${item.g_per_unit ?? ""}" placeholder="Ej: zanahoria 80"></label>
-      </div>
-      <div class="row"><button class="primary" type="submit">Guardar</button></div>
-    </form>`);
-  $("#x").onclick = closeModal;
-  $("#eqf").onsubmit = (e) => {
-    e.preventDefault();
-    const f = e.target;
-    safe(async () => {
-      await api(`/api/ingredients/${item.ingredient_id}`, { method: "PATCH", json: {
-        category: f.category.value,
-        g_per_cup: parseFloat(f.g_per_cup.value) || null,
-        g_per_unit: parseFloat(f.g_per_unit.value) || null,
-      } });
-      closeModal();
-      toast("Equivalencias guardadas");
-      renderPantry();
-    });
+async function renderPantry() {
+  const [items, ingredients] = await Promise.all([api("/api/pantry"), api("/api/ingredients")]);
+  const groups = META.inventory_groups;
+  const groupOf = (cat) => groups.find((g) => g.categories.includes(cat)) ?? groups[groups.length - 1];
+  const out = items.filter((i) => i.quantity <= 0);
+  const low = items.filter((i) => i.quantity > 0 && i.low);
+  const expiring = items.filter((i) => i.quantity > 0 && i.expiring);
+  const has = items.filter((i) => i.quantity > 0);
+  const q = pantryQuery.trim().toLowerCase();
+  const match = (i) => !q || i.name.toLowerCase().includes(q);
+
+  const chip = (i, tone, text) => `<button class="p-chip ${tone}" data-item="${i.id}">${esc(i.name)}<small>${esc(text)}</small></button>`;
+  const attention = [
+    ...out.map((i) => chip(i, "bad", "se acabó")),
+    ...low.map((i) => chip(i, "warn", "queda poco")),
+    ...expiring.map((i) => chip(i, "warn", whenExpires(i))),
+  ];
+  const line = (i) => {
+    const extra = [whenExpires(i), i.min_quantity != null ? `avisa si baja de ${fmtAmount(i.min_quantity, i.unit)}` : ""].filter(Boolean);
+    return `<button class="p-line ${i.expiring ? "soon" : ""} ${i.low ? "low" : ""}" data-item="${i.id}">
+      <span class="p-name">${esc(i.name)}</span>
+      <span class="p-dots" aria-hidden="true"></span>
+      <span class="p-qty">${i.quantity > 0 ? esc(fmtAmount(i.quantity, i.unit)) : "se acabó"}</span>
+      ${extra.length ? `<small class="p-extra">${esc(extra.join(" · "))}</small>` : ""}
+    </button>`;
   };
+  const byGroup = groups.map((g) => ({ g, list: has.filter((i) => groupOf(i.category).key === g.key && match(i)) })).filter((x) => x.list.length);
+  const outShown = out.filter(match);
+
+  view.innerHTML = `
+    <div class="p-bar">
+      <label class="p-search">${icon("search", 20)}<input id="p-q" type="search" placeholder="Buscar en la despensa…" value="${esc(pantryQuery)}" autocomplete="off"></label>
+      <button id="add-p">${icon("plus", 20)} Agregar</button>
+      <button class="primary" id="scan">${icon("camera", 20)} Foto</button>
+      <button class="ghost p-settings" id="p-set" title="Ajustes de la despensa" aria-label="Ajustes de la despensa">${icon("sliders", 22)}</button>
+    </div>
+    ${!q ? `<section class="card p-attn ${attention.length ? "" : "calm"}">
+      ${attention.length ? `<h2>${icon("warn", 22)} Ojo con esto</h2><div class="p-chips">${attention.join("")}</div>
+        ${expiring.length ? `<a href="#" id="use-exp" class="small">Ver qué cocinar con lo que se vence</a>` : ""}`
+      : `<h2>${icon("check", 22)} Todo en orden</h2><p class="muted small" style="margin:0">Nada agotado, nada por vencer.</p>`}
+    </section>` : ""}
+    ${byGroup.length ? `<div class="p-groups">${byGroup.map(({ g, list }) => `
+      <section class="card p-group g-${g.key}">
+        <h3><span class="p-gic">${icon(g.icon, 22)}</span>${esc(g.label)}<small>${list.length}</small></h3>
+        ${list.map(line).join("")}
+      </section>`).join("")}</div>`
+    : `<div class="empty card">${q ? `No hay nada que se llame «${esc(pantryQuery)}».` : "La despensa está vacía. Agreguen lo que hay a mano o con una foto de la nevera."}</div>`}
+    ${outShown.length ? `<details class="card p-out" ${q ? "open" : ""}><summary>Se acabaron <small>${outShown.length}</small></summary>
+      ${outShown.map(line).join("")}</details>` : ""}`;
+
+  const byId = (id) => items.find((i) => i.id === +id);
+  $$("[data-item]", view).forEach((b) => b.onclick = () => pantryItemForm(byId(b.dataset.item)));
+  const qInput = $("#p-q");
+  qInput.oninput = () => {
+    pantryQuery = qInput.value;
+    const pos = qInput.selectionStart;
+    renderPantry().then(() => { const n = $("#p-q"); n.focus(); n.setSelectionRange(pos, pos); });
+  };
+  $("#add-p").onclick = () => pantryAddForm();
+  $("#scan").onclick = scanDialog;
+  $("#p-set").onclick = () => pantrySettings(ingredients);
+  $("#use-exp")?.addEventListener("click", (e) => { e.preventDefault(); go("cook"); });
+}
+
+function pantryAddForm() {
+  const mode = META.inventory_mode ?? "normal";
+  const m = formModal({
+    title: "Agregar a la despensa",
+    body: `<form id="pf" class="stack">
+      <label class="field">¿Qué es?<input name="name" required autocomplete="off" placeholder="Ej: Leche"></label>
+      <div class="field">¿Cuánto hay?${amountForm(null, null, { withUnit: true, preferPortions: mode === "tranquilo" })}</div>
+      <details class="p-more"><summary>Vencimiento, aviso y categoría</summary>
+        <div class="form-grid">
+          <label class="field">Vence<input name="expires_on" type="date"></label>
+          <label class="field">Avisar si baja de<input name="min_quantity" type="number" step="any" min="0" placeholder="Opcional"></label>
+          <label class="field">Categoría<select name="category">${options(META.categories, "", "La elige la app")}</select></label>
+        </div></details></form>`,
+    actions: [
+      { label: "Cancelar", value: false },
+      { label: "Agregar", tone: "primary", icon: "plus", onClick: async (dlg) => {
+        const f = $("#pf", dlg);
+        if (!f.reportValidity()) return false;
+        const ok = await safe(async () => {
+          await api("/api/pantry", { method: "POST", json: {
+            name: f.name.value, ...readAmountForm(dlg, null),
+            category: f.category.value || null, expires_on: f.expires_on.value || null,
+            min_quantity: f.min_quantity.value === "" ? null : parseFloat(f.min_quantity.value),
+          } });
+          return true;
+        });
+        if (!ok) return false;
+        toast(`${f.name.value} agregado`);
+        return true;
+      } },
+    ],
+  });
+  bindAmountForm(m.el, null);
+  m.done.then((ok) => ok && renderPantry());
+}
+
+// Un producto: cuánto hay y, solo si se quiere, vencimiento, aviso de mínimo y lo técnico (categoría y equivalencias).
+function pantryItemForm(i) {
+  const mode = META.inventory_mode ?? "normal";
+  const m = formModal({
+    title: esc(i.name),
+    body: `<form id="pif" class="stack">
+      <div class="field">¿Cuánto hay?${amountForm(i.unit, i.quantity, { withUnit: true, preferPortions: mode === "tranquilo" })}</div>
+      <label class="p-toggle"><input type="checkbox" name="has_exp" ${i.expires_on ? "checked" : ""}> Tiene fecha de vencimiento</label>
+      <label class="field p-sub" data-for="has_exp" ${i.expires_on ? "" : "hidden"}>Vence<input name="expires_on" type="date" value="${i.expires_on ?? ""}"></label>
+      <label class="p-toggle"><input type="checkbox" name="has_min" ${i.min_quantity != null ? "checked" : ""}> Avisarme cuando quede poco</label>
+      <label class="field p-sub" data-for="has_min" ${i.min_quantity != null ? "" : "hidden"}>Pasa a la lista de compras si baja de
+        <span class="row" style="gap:.5rem;flex-wrap:nowrap"><input name="min_quantity" type="number" step="any" min="0" value="${i.min_quantity ?? ""}" style="max-width:8rem">
+        <span class="muted">${esc(i.unit === "porcion" ? "porciones" : i.unit)}</span></span></label>
+      <details class="p-more"><summary>Más opciones</summary>
+        <label class="field">Categoría<select name="category">${options(META.categories, i.category)}</select></label>
+        <p class="muted small" style="margin:.2rem 0">Si las recetas lo piden en tazas o unidades pero se compra por peso, digan cuánto pesa:</p>
+        <div class="form-grid">
+          <label class="field">1 taza pesa (g)<input name="g_per_cup" type="number" step="any" min="0" value="${i.g_per_cup ?? ""}" placeholder="Ej: arroz 200"></label>
+          <label class="field">1 unidad pesa (g)<input name="g_per_unit" type="number" step="any" min="0" value="${i.g_per_unit ?? ""}" placeholder="Ej: zanahoria 80"></label>
+        </div></details>
+    </form>`,
+    onOpen: (dlg) => {
+      bindAmountForm(dlg, i.unit);
+      $$(".p-toggle input", dlg).forEach((c) => c.onchange = () => { $(`[data-for="${c.name}"]`, dlg).hidden = !c.checked; });
+    },
+    actions: [
+      { label: "Quitar", tone: "danger", icon: "trash", value: "delete" },
+      ...(i.quantity > 0 ? [{ label: "Se acabó", value: "out" }] : []),
+      { label: "Guardar", tone: "primary", icon: "check", onClick: async (dlg) => {
+        const f = $("#pif", dlg);
+        const amount = readAmountForm(dlg, i.unit);
+        const ok = await safe(async () => {
+          await api(`/api/pantry/${i.id}`, { method: "PATCH", json: {
+            ...amount,
+            expires_on: f.has_exp.checked && f.expires_on.value ? f.expires_on.value : null,
+            min_quantity: f.has_min.checked && f.min_quantity.value !== "" ? parseFloat(f.min_quantity.value) : null,
+          } });
+          const cup = parseFloat(f.g_per_cup.value) || null, unit = parseFloat(f.g_per_unit.value) || null;
+          if (f.category.value !== i.category || cup !== i.g_per_cup || unit !== i.g_per_unit) {
+            await api(`/api/ingredients/${i.ingredient_id}`, { method: "PATCH", json: { category: f.category.value, g_per_cup: cup, g_per_unit: unit } });
+          }
+          return true;
+        });
+        if (!ok) return false;
+        toast(`${i.name}: guardado`);
+        return true;
+      } },
+    ],
+  });
+  m.done.then(async (v) => {
+    if (v === "out") {
+      await safe(() => api(`/api/pantry/${i.id}`, { method: "PATCH", json: { quantity: 0 } }));
+      toast(`${i.name}: se acabó`);
+    }
+    if (v === "delete") {
+      if (!await confirmModal({ title: "¿Quitar de la despensa?", text: `«${esc(i.name)}» deja de aparecer en el inventario.`, ok: "Quitar", tone: "danger", okIcon: "trash" })) return;
+      await safe(() => api(`/api/pantry/${i.id}`, { method: "DELETE" }));
+    }
+    if (v) renderPantry();
+  });
+}
+
+// Lo que se configura una vez: qué tan exigente es la cuenta y los básicos que siempre hay.
+function pantrySettings(ingredients) {
+  let mode = META.inventory_mode ?? "normal";
+  const draw = (dlg) => {
+    const staples = ingredients.filter((i) => i.is_staple);
+    $("#pset", dlg).innerHTML = `
+      <div class="field">¿Qué tan exigente con lo que hay?
+        <div class="modes">${INVENTORY_MODES.map(([k, label, text]) => `
+          <label class="mode ${k === mode ? "on" : ""}"><input type="radio" name="inv-mode" value="${k}" ${k === mode ? "checked" : ""}>
+            <b>${label}</b><span class="small muted">${text}</span></label>`).join("")}</div></div>
+      <div class="field" ${mode === "exacto" ? "hidden" : ""}>Básicos que siempre hay
+        <span class="small muted" style="font-weight:400">No hace falta tenerlos en la despensa ni aparecen en la lista de compras, salvo que digan «se acabó».</span>
+        <div class="row" style="gap:.4rem;margin-top:.4rem">${staples.map((i) => `
+          <span class="badge ok staple">${esc(i.name)}<button type="button" class="ghost" data-unstaple="${i.id}" aria-label="Quitar ${esc(i.name)} de los básicos">${icon("close", 14)}</button></span>`).join("")}</div>
+        <div class="row" style="gap:.4rem;margin-top:.5rem"><input id="staple-n" placeholder="Agregar un básico…" list="dl-ing-all" autocomplete="off" style="max-width:16rem">
+          <button type="button" id="staple-add">${icon("plus", 18)} Agregar</button></div>
+        <datalist id="dl-ing-all">${ingredients.filter((i) => !i.is_staple).map((i) => `<option value="${esc(i.name)}">`).join("")}</datalist>
+      </div>`;
+    $$("[name=inv-mode]", dlg).forEach((r) => r.onchange = () => safe(async () => {
+      const res = await api("/api/settings", { method: "PUT", json: { inventory_mode: r.value } });
+      META.inventory_mode = mode = res.inventory_mode;
+      toast(`Modo ${INVENTORY_MODES.find(([k]) => k === mode)[1].toLowerCase()}`);
+      draw(dlg);
+    }));
+    const reload = async () => { ingredients = await api("/api/ingredients"); draw(dlg); };
+    $$("[data-unstaple]", dlg).forEach((b) => b.onclick = () => safe(async () => {
+      await api(`/api/ingredients/${b.dataset.unstaple}`, { method: "PATCH", json: { staple: false } });
+      await reload();
+    }));
+    const add = () => {
+      const name = $("#staple-n", dlg).value.trim();
+      if (name) safe(async () => { await api("/api/staples", { method: "POST", json: { name } }); await reload(); });
+    };
+    $("#staple-add", dlg).onclick = add;
+    $("#staple-n", dlg).onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); add(); } };
+  };
+  const m = formModal({
+    title: "Ajustes de la despensa", size: "wide",
+    body: `<div id="pset" class="stack"></div>`,
+    onOpen: (dlg) => draw(dlg),
+    actions: [{ label: "Listo", tone: "primary", icon: "check" }],
+  });
+  m.done.then(() => renderPantry());
 }
 
 function scanDialog() {
@@ -660,17 +725,80 @@ function bindAI() {
   });
 }
 
-async function renderHouse() {
-  const [members, chores, stats, spend] = await Promise.all([
-    api("/api/members"), api("/api/chores"), api("/api/chores/stats"), api("/api/purchases"),
-  ]);
-  const memberOpts = (sel, rotate) => `
-    <option value="">Cualquiera</option>
-    <option value="rotate" ${rotate ? "selected" : ""}>Por turnos</option>
-    ${members.map((m) => `<option value="${m.id}" ${m.id === sel ? "selected" : ""}>${esc(m.name)}</option>`).join("")}`;
+// ---------------------------------------------------------------- calendario de Google
 
+async function renderGCal() {
+  const card = $("#gcal-card");
+  if (!card) return;
+  const g = await api("/api/gcal");
+  const synced = g.last_sync ? new Date(g.last_sync) : null;
+  const when = synced && !Number.isNaN(synced.getTime()) ? synced.toLocaleString("es", { dateStyle: "medium", timeStyle: "short" }) : null;
+  let body;
+  if (!g.credentials) {
+    body = `<p class="muted small" style="margin:0">La agenda de la tablet se puede sincronizar con el calendario que la familia ya comparte en Google:
+        lo que anoten en el celular aparece en la tablet (y se avisa en voz alta), y lo que anoten aquí o por voz aparece en los celulares.</p>
+      <ol class="small steps">
+        <li>En <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud</a>, creen un proyecto, activen la
+          <b>Google Calendar API</b> y creen una <b>cuenta de servicio</b> con una clave JSON.</li>
+        <li>Guarden ese archivo en el computador de la casa y pongan su ruta en <code>MYCHEF_GOOGLE_CREDENTIALS</code>. Reinicien la app.</li>
+        <li>Vuelvan aquí: les diremos con qué correo compartir el calendario.</li>
+      </ol>
+      <span class="badge warn">Falta MYCHEF_GOOGLE_CREDENTIALS</span>`;
+  } else {
+    body = `<div class="field">1. En Google Calendar, abran <b>Configuración y uso compartido</b> del calendario de la familia y compártanlo con este correo,
+        con permiso de <b>Hacer cambios en los eventos</b>:
+        <div class="row" style="margin-top:.35rem"><code class="g-email">${esc(g.service_email ?? "")}</code>
+          <button class="ghost" id="g-copy">${icon("check", 16)} Copiar</button></div></div>
+      <label class="field">2. En esa misma página, copien el <b>ID del calendario</b> (en «Integrar el calendario») y péguenlo aquí:
+        <input id="g-cal" value="${esc(g.calendar_id)}" placeholder="…@group.calendar.google.com" autocomplete="off" spellcheck="false"></label>
+      <div class="row">
+        <button class="primary" id="g-connect">${icon("calendar", 18)} ${g.enabled ? "Guardar" : "Conectar"}</button>
+        ${g.enabled ? `<button id="g-sync-now">${icon("undo", 18)} Sincronizar ahora</button>
+          <button class="ghost danger" id="g-off">Desconectar</button>` : ""}
+      </div>
+      ${g.enabled ? `<p class="small ${g.error ? "bad-text" : "ok-text"}" style="margin:0">${g.error ? esc(g.error)
+        : `Conectado${g.calendar_name ? ` a «${esc(g.calendar_name)}»` : ""}${when ? ` · última sincronización: ${esc(when)}` : ""}`}</p>
+        <p class="muted small" style="margin:0">Se sincroniza sola cada 5 minutos mientras la tablet está prendida, y al momento cuando se anota algo aquí.</p>` : ""}`;
+  }
+  card.innerHTML = `<h2>Calendario de Google</h2>${body}`;
+  $("#g-copy", card)?.addEventListener("click", () =>
+    navigator.clipboard?.writeText(g.service_email).then(() => toast("Correo copiado"), () => toast("No se pudo copiar")));
+  $("#g-connect", card)?.addEventListener("click", (e) => withBusy(e.currentTarget, async () => {
+    const ok = await safe(() => api("/api/gcal", { method: "PUT", json: { calendar_id: $("#g-cal", card).value.trim() } }));
+    if (ok) toast("Calendario conectado");
+    renderGCal();
+  }));
+  $("#g-sync-now", card)?.addEventListener("click", (e) => withBusy(e.currentTarget, async () => {
+    const r = await safe(() => api("/api/gcal/sync", { method: "POST" }));
+    if (r) toast(`Listo: ${r.up} subidos, ${r.down} traídos de Google`);
+    renderGCal();
+  }));
+  $("#g-off", card)?.addEventListener("click", async () => {
+    if (!await confirmModal({ title: "¿Dejar de sincronizar?", text: "Lo que ya está en la agenda se queda, aquí y en Google. Solo dejan de pasarse los cambios.", ok: "Desconectar", tone: "danger" })) return;
+    await safe(() => api("/api/gcal", { method: "DELETE" }));
+    renderGCal();
+  });
+}
+
+async function renderHouse() {
+  const [members, stats, spend, kids] = await Promise.all([
+    api("/api/members"), api("/api/chores/stats"), api("/api/purchases"), api("/api/kids"),
+  ]);
+  const kidOf = (m) => kids.find((k) => k.member.id === m.id);
+
+  const portion = [0.25, 0.5, 0.75, 1].includes(META.kid_portion) ? META.kid_portion : 0.5;
   view.innerHTML = `
     <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(320px,1fr))">
+      <section class="card stack">
+        <h2>¿Quiénes comen en casa?</h2>
+        <div class="form-grid household-card">
+          <label class="field">Adultos<input id="household" type="number" min="1" max="50" value="${META.household_size}"></label>
+          <label class="field">Niños<input id="household-kids" type="number" min="0" max="20" value="${META.household_kids}"></label>
+          <label class="field">Un niño come<select id="kid-portion">${[[0.25, "¼ de porción"], [0.5, "½ porción"], [0.75, "¾ de porción"], [1, "igual que un adulto"]]
+            .map(([v, t]) => `<option value="${v}" ${v === portion ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+        </div>
+        <p class="muted small" style="margin:0">Con esto se calculan las cantidades del menú y de las recetas. Cada comida se puede cambiar aparte.</p>
+      </section>
       <section class="card stack">
         <h2>La casa</h2>
         <div class="row spread"><span style="font-family:var(--serif);font-size:1.3rem">${esc(META.house_name)}</span>
@@ -700,11 +828,15 @@ async function renderHouse() {
         ${aiRow("text", "Texto y voz", "Recetas escritas y frases que la tablet no entendió.")}
         <p class="muted small" style="margin:0">Las claves se ponen en el computador de la casa (variables de entorno), no aquí.</p>
       </section>
+      <section class="card stack" id="gcal-card"><h2>Calendario de Google</h2><p class="muted small">Cargando…</p></section>
       <section class="card stack">
         <h2>Personas de la casa</h2>
         <ul class="clean">${members.map((m) => `
           <li class="row spread"><span class="row" style="font-size:1.05rem">${avatar(m, 32)} ${esc(m.name)}</span>
             <span class="row"><span class="muted small">${stats.find((s) => s.id === m.id)?.done ?? 0} tareas en 30 días</span>
+            <label class="row small" title="Sus tareas le dan estrellas y tiene su pantalla de logros"><input type="checkbox" data-kid-m="${m.id}" ${m.kid ? "checked" : ""}> Niño/a</label>
+            ${kidOf(m) ? `<button class="prize-btn" data-go-prizes title="Su premio está en la pestaña Premios">
+              <span class="prize-mini">${prizeArt(kidOf(m).goal, 22)}</span>${kidOf(m).goal ? `${kidOf(m).stars}/${kidOf(m).goal.stars} ★` : "Poner premio"}</button>` : ""}
             <button class="ghost danger" data-del-m="${m.id}" title="Quitar">${icon("close", 18)}</button></span></li>`).join("") || `<li class="muted">Aún no hay nadie.</li>`}
         </ul>
         <div><button id="add-m">${icon("plus", 20)} Agregar persona</button></div>
@@ -717,26 +849,7 @@ async function renderHouse() {
           <li class="row spread"><span>${esc(p.store || "Compra")} · ${new Date(p.day + "T12:00").toLocaleDateString("es")}</span>
             <span>${fmtMoney(p.total)} <span class="muted">(${p.items} productos)</span></span></li>`).join("") || `<li class="muted">Escaneen una factura desde la pantalla de la casa.</li>`}</ul>
       </section>
-    </div>
-    <section class="card stack" style="margin-top:.75rem">
-      <h2>Tareas del hogar</h2>
-      <table><thead><tr><th></th><th>Tarea</th><th>¿Cuándo?</th><th>¿A quién le toca?</th><th>Próxima</th><th></th></tr></thead>
-        <tbody>${chores.map((c) => `
-          <tr data-id="${c.id}">
-            <td><span class="row" style="flex-wrap:nowrap;color:var(--green-ink)">${choreIcon(c.emoji, 24)}
-              <select data-f="emoji" aria-label="Dibujo">${META.chore_emojis.map((e) => `<option value="${e}" ${e === c.emoji ? "selected" : ""}>${CHORE_ICONS[e]?.[1] ?? e}</option>`).join("")}</select></span></td>
-            <td><input data-f="name" value="${esc(c.name)}"></td>
-            <td><button class="when-btn" data-when="${c.id}">${icon("calendar", 18)} ${esc(c.when)}${c.remind_at ? `<span class="remind">${icon("speaker", 16)} ${c.remind_at}</span>` : ""}</button></td>
-            <td><select data-f="who">${memberOpts(c.member_id, c.rotate)}</select></td>
-            <td class="small">${c.is_due ? `<span class="badge warn">${c.days_late ? `atrasada ${c.days_late} día${c.days_late > 1 ? "s" : ""}` : "hoy"}</span>` : esc(cap(c.due_text))}</td>
-            <td><button class="ghost danger" data-del-c="${c.id}" title="Quitar">${icon("close", 18)}</button></td>
-          </tr>`).join("")}</tbody></table>
-      <div><button class="primary" id="add-c">${icon("plus", 20)} Agregar tarea</button></div>
-    </section>`;
-
-  const whoFields = (v) => v === "rotate" ? { member_id: null, rotate: true } : { member_id: v ? +v : null, rotate: false };
-  const pickGrid = (name, list, selected, draw = (e) => e) => `<div class="pick">${list.map((e) => `
-    <label title="${esc(CHORE_ICONS[e]?.[1] ?? "")}"><input type="radio" name="${name}" value="${e}" ${e === selected ? "checked" : ""}><span>${draw(e)}</span></label>`).join("")}</div>`;
+    </div>`;
 
   $("#house-name").onclick = () => {
     formModal({
@@ -755,6 +868,17 @@ async function renderHouse() {
       ],
     });
   };
+  $$("#household, #household-kids, #kid-portion", view).forEach((inp) => inp.addEventListener("change", () => safe(async () => {
+    const adults = parseInt($("#household").value, 10);
+    const kids = parseInt($("#household-kids").value, 10) || 0;
+    if (!adults || adults < 1) return toast("Tiene que haber al menos un adulto");
+    const res = await api("/api/settings", { method: "PUT", json: {
+      household_size: adults, household_kids: kids, kid_portion: parseFloat($("#kid-portion").value),
+    } });
+    Object.assign(META, res);
+    setHouse(META);
+    toast(`En casa comen ${peopleText(adults, kids)}`);
+  })));
   const vp = getVoicePrefs();
   $("#v-on").checked = vp.on;
   $("#v-rate").value = String([0.85, 1, 1.15].includes(vp.rate) ? vp.rate : 1);
@@ -772,6 +896,7 @@ async function renderHouse() {
   $("#v-rate").onchange = (e) => { setVoicePrefs({ rate: +e.target.value }); speak("Hola, así de rápido hablo.", { force: true }); };
   $("#v-test").onclick = () => speak(`Hola, soy ${META.house_name}. Hoy hay arroz con pollo de almuerzo.`, { force: true });
   bindAI();
+  renderGCal();
   const wakeBox = $("#wake-on");
   if (wakeBox) {
     try { wakeBox.checked = localStorage.getItem(WAKE_KEY) === "1"; } catch { /* sin almacenamiento */ }
@@ -801,19 +926,133 @@ async function renderHouse() {
       title: "Agregar persona",
       body: `<form id="mf" class="stack">
         <label class="field">Nombre<input name="name" required maxlength="40" autocomplete="off" placeholder="Ej: Sofi"></label>
-        <p class="muted small" style="margin:0">En la tablet aparece con su inicial en un círculo de color.</p></form>`,
+        <label class="row"><input type="checkbox" name="kid"> Es niño o niña</label>
+        <p class="muted small" style="margin:0">En la tablet aparece con su inicial en un círculo de color. A los niños sus tareas
+          les dan estrellas para juntar un premio (en la tablet: Tareas → Logros).</p></form>`,
       actions: [
         { label: "Cancelar", value: false },
         { label: "Agregar", tone: "primary", icon: "plus", onClick: async (dlg) => {
           const f = $("#mf", dlg);
           if (!f.reportValidity()) return false;
-          const ok = await safe(() => api("/api/members", { method: "POST", json: { name: f.name.value } }));
+          const ok = await safe(() => api("/api/members", { method: "POST", json: { name: f.name.value, kid: f.kid.checked } }));
           if (!ok) return false;
           renderHouse();
         } },
       ],
     });
   };
+  $$("[data-kid-m]", view).forEach((c) => c.onchange = () => safe(async () => {
+    const m = members.find((x) => x.id === +c.dataset.kidM);
+    await api(`/api/members/${m.id}`, { method: "PUT", json: { name: m.name, emoji: m.emoji, kid: c.checked } });
+    toast(c.checked ? `${m.name} gana estrellas con sus tareas` : `${m.name} ya no está en Logros`);
+    renderHouse();
+  }));
+  $$("[data-go-prizes]", view).forEach((b) => b.onclick = () => go("prizes"));
+  $$("[data-del-m]", view).forEach((b) => b.onclick = () => safe(async () => {
+    if (!await confirmModal({ title: "¿Quitar a esta persona?", text: "Sus tareas quedan para cualquiera.", ok: "Quitar", tone: "danger", okIcon: "trash" })) return;
+    await api(`/api/members/${b.dataset.delM}`, { method: "DELETE" });
+    renderHouse();
+  }));
+}
+
+// ------------------------------------------------------------------ premios de los niños (pestaña propia)
+// Cada tarea hecha les da estrellas; las juntan para el premio que se pone aquí. Para los que aún no
+// leen, el premio lleva un ícono a color o una foto: así lo reconocen en la tablet.
+
+async function renderPrizes() {
+  const [members, kids] = await Promise.all([api("/api/members"), api("/api/kids")]);
+  view.innerHTML = `
+    <section class="card stack">
+      <h2>Premios de los niños</h2>
+      <p class="muted small" style="margin:0">Cada tarea hecha les da estrellas (1, 2 o 3, según se elija en Tareas). Los premios van en
+        un mismo camino: por ejemplo a las 10 estrellas un helado, a las 15 el parque y a las 20 la bici. Al llegar a uno, se
+        entrega y siguen hacia el próximo; entregar no gasta estrellas. Al entregar el último, el camino empieza otra vuelta.</p>
+      ${members.length ? `<div class="kid-checks"><span class="small muted">¿Quiénes son niños?</span>${members.map((m) => `
+        <label class="kid-check"><input type="checkbox" data-kid-m="${m.id}" ${m.kid ? "checked" : ""}>${avatar(m, 26)} ${esc(m.name)}</label>`).join("")}</div>`
+      : `<p class="muted">Primero agreguen a las personas en la pestaña Casa.</p>`}
+    </section>
+    <div class="prize-cards">${kids.map((k) => {
+      const claim = k.claims[0];
+      return `<section class="card prize-card stack ${k.goal?.ready ? "ready" : ""}" data-kid="${k.member.id}">
+        <div class="row spread"><span class="row pc-who">${avatar(k.member, 30)} ${esc(k.member.name)}</span>
+          <span class="small muted row" style="gap:.3rem"><i class="ks-18">${kidStar()}</i> va en la estrella ${k.stars}${k.path ? ` de ${k.path}` : ""}</span></div>
+        ${k.prizes.length ? `${kidPath(k)}${prizeRows(k)}` : `<p class="muted" style="margin:0">Todavía no tiene premios.</p>`}
+        <div class="row" style="gap:.5rem;flex-wrap:wrap">
+          <button class="${k.prizes.length ? "" : "primary"}" data-add-prize="${k.member.id}">${icon("plus", 18)} Agregar premio</button>
+          ${claim ? `<span class="small muted">Último entregado: ${esc(claim.name)} · ${new Date(claim.day + "T12:00").toLocaleDateString("es-CO", { day: "numeric", month: "short" })}</span>
+            <button class="ghost" data-unclaim="${k.member.id}">${icon("undo", 16)} Deshacer</button>` : ""}
+        </div>
+      </section>`;
+    }).join("")}</div>`;
+
+  const kidOf = (id) => kids.find((k) => k.member.id === +id);
+  $$("[data-kid-m]", view).forEach((c) => c.onchange = () => safe(async () => {
+    const m = members.find((x) => x.id === +c.dataset.kidM);
+    await api(`/api/members/${m.id}`, { method: "PUT", json: { name: m.name, emoji: m.emoji, kid: c.checked } });
+    toast(c.checked ? `${m.name} gana estrellas con sus tareas` : `${m.name} ya no está en Premios`);
+    renderPrizes();
+  }));
+  $$("[data-add-prize]", view).forEach((b) => b.onclick = async () => {
+    if (await prizeForm(kidOf(b.dataset.addPrize), META.prizes)) renderPrizes();
+  });
+  $$(".prize-card", view).forEach((card) => {
+    const k = kidOf(card.dataset.kid);
+    $$("[data-edit-prize]", card).forEach((b) => b.onclick = async () => {
+      if (await prizeForm(k, META.prizes, k.prizes.find((p) => p.id === +b.dataset.editPrize))) renderPrizes();
+    });
+  });
+  $$("[data-claim]", view).forEach((b) => b.onclick = () => safe(async () => {
+    const k = kidOf(b.dataset.claim);
+    if (!await confirmModal({ title: "¿Entregar el premio?", text: `${esc(k.member.name)} llegó a «${esc(k.goal.name)}». Sus estrellas no bajan: el camino sigue.`, ok: "Sí, entregar", okIcon: "gift" })) return;
+    await api(`/api/kids/${k.member.id}/claim`, { method: "POST" });
+    toast(`¡A disfrutar, ${k.member.name}!`);
+    renderPrizes();
+  }));
+  $$("[data-unclaim]", view).forEach((b) => b.onclick = () => safe(async () => {
+    const k = kidOf(b.dataset.unclaim);
+    if (!await confirmModal({ title: "¿Deshacer el último premio?", text: `«${esc(k.claims[0].name)}» vuelve a quedar sin entregar.`, ok: "Sí, deshacer", okIcon: "undo" })) return;
+    await api(`/api/kids/${k.member.id}/claim/undo`, { method: "POST" });
+    renderPrizes();
+  }));
+}
+
+// ------------------------------------------------------------------ tareas del hogar (pestaña propia)
+
+async function renderChoresAdmin() {
+  const [members, chores] = await Promise.all([api("/api/members"), api("/api/chores")]);
+  const memberOpts = (sel, rotate) => `
+    <option value="">Cualquiera</option>
+    <option value="rotate" ${rotate ? "selected" : ""}>Por turnos</option>
+    ${members.map((m) => `<option value="${m.id}" ${m.id === sel ? "selected" : ""}>${esc(m.name)}</option>`).join("")}`;
+  // Estrellas que gana un niño (solo si hay alguien marcado como niño en Casa)
+  const kids = members.some((m) => m.kid);
+  const STARS = [[1, "★ Fácil"], [2, "★★ Normal"], [3, "★★★ Grande"]];
+  const starOpts = (sel) => STARS.map(([n, t]) => `<option value="${n}" ${n === sel ? "selected" : ""}>${t}</option>`).join("");
+
+  view.innerHTML = `
+    <section class="card stack" >
+      <h2>Tareas del hogar</h2>
+      <table><thead><tr><th></th><th>Tarea</th><th>¿Cuándo?</th><th>¿A quién le toca?</th>${kids ? "<th>Estrellas</th>" : ""}<th>Próxima</th><th></th></tr></thead>
+        <tbody>${chores.map((c) => `
+          <tr data-id="${c.id}">
+            <td><span class="row" style="flex-wrap:nowrap;color:var(--green-ink)">${choreIcon(c.emoji, 24)}
+              <select data-f="emoji" aria-label="Dibujo">${META.chore_emojis.map((e) => `<option value="${e}" ${e === c.emoji ? "selected" : ""}>${CHORE_ICONS[e]?.[1] ?? e}</option>`).join("")}</select></span></td>
+            <td><input data-f="name" value="${esc(c.name)}"></td>
+            <td><button class="when-btn" data-when="${c.id}">${icon("calendar", 18)} ${esc(c.when)}${c.remind_at ? `<span class="remind">${icon("speaker", 16)} ${c.remind_at}</span>` : ""}</button></td>
+            <td><select data-f="who">${memberOpts(c.member_id, c.rotate)}</select></td>
+            ${kids ? `<td><select data-f="stars" aria-label="Estrellas que gana un niño">${starOpts(c.stars ?? 1)}</select></td>` : ""}
+            <td class="small">${c.is_due ? `<span class="badge warn">${c.days_late ? `atrasada ${c.days_late} día${c.days_late > 1 ? "s" : ""}` : "hoy"}</span>` : esc(cap(c.due_text))}</td>
+            <td><button class="ghost danger" data-del-c="${c.id}" title="Quitar">${icon("close", 18)}</button></td>
+          </tr>`).join("")}</tbody></table>
+      <div><button class="primary" id="add-c">${icon("plus", 20)} Agregar tarea</button></div>
+    </section>
+    ${members.length ? "" : `<p class="muted small">Para repartir las tareas, agreguen primero a las personas en la pestaña Casa.</p>`}
+    ${members.length && !kids ? `<p class="muted small">Para que las tareas den estrellas a los niños, márquenlos como «Niño/a» en la pestaña Casa.</p>` : ""}`;
+
+  const whoFields = (v) => v === "rotate" ? { member_id: null, rotate: true } : { member_id: v ? +v : null, rotate: false };
+  const pickGrid = (name, list, selected, draw = (e) => e) => `<div class="pick">${list.map((e) => `
+    <label title="${esc(CHORE_ICONS[e]?.[1] ?? "")}"><input type="radio" name="${name}" value="${e}" ${e === selected ? "checked" : ""}><span>${draw(e)}</span></label>`).join("")}</div>`;
+
   $("#add-c").onclick = () => {
     formModal({
       title: "Nueva tarea de la casa",
@@ -822,6 +1061,7 @@ async function renderHouse() {
         <div class="field">Dibujo${pickGrid("emoji", META.chore_emojis, META.chore_emojis[0], (e) => choreIcon(e, 26))}</div>
         <div class="form-grid">
           <label class="field">¿A quién le toca?<select name="who">${memberOpts(null, false)}</select></label>
+          ${kids ? `<label class="field">Estrellas que gana un niño<select name="stars">${starOpts(1)}</select></label>` : ""}
         </div>
         ${scheduleFields({})}</form>`,
       onOpen: (dlg) => bindSchedule($("#cf", dlg)),
@@ -832,9 +1072,10 @@ async function renderHouse() {
           if (!f.reportValidity()) return false;
           const ok = await safe(() => api("/api/chores", { method: "POST", json: {
             name: f.name.value, emoji: f.emoji.value, ...whoFields(f.who.value), ...readSchedule(f),
+            ...(f.stars ? { stars: +f.stars.value } : {}),
           } }));
           if (!ok) return false;
-          renderHouse();
+          renderChoresAdmin();
         } },
       ],
     });
@@ -845,9 +1086,10 @@ async function renderHouse() {
     const c = chores.find((x) => x.id === +tr.dataset.id);
     await api(`/api/chores/${tr.dataset.id}`, { method: "PUT", json: {
       ...scheduleOf(c), name: get("name"), emoji: get("emoji"), ...whoFields(get("who")),
+      ...(kids ? { stars: +get("stars") } : {}),
     } });
     toast("Tarea actualizada");
-    renderHouse();
+    renderChoresAdmin();
   }));
   $$("[data-when]", view).forEach((b) => b.onclick = () => {
     const c = chores.find((x) => x.id === +b.dataset.when);
@@ -863,7 +1105,7 @@ async function renderHouse() {
           } }));
           if (!ok) return false;
           toast("Horario guardado");
-          renderHouse();
+          renderChoresAdmin();
         } },
       ],
     });
@@ -871,12 +1113,7 @@ async function renderHouse() {
   $$("[data-del-c]", view).forEach((b) => b.onclick = () => safe(async () => {
     if (!await confirmModal({ title: "¿Quitar esta tarea?", text: "Se borra junto con su historial.", ok: "Quitar", tone: "danger", okIcon: "trash" })) return;
     await api(`/api/chores/${b.dataset.delC}`, { method: "DELETE" });
-    renderHouse();
-  }));
-  $$("[data-del-m]", view).forEach((b) => b.onclick = () => safe(async () => {
-    if (!await confirmModal({ title: "¿Quitar a esta persona?", text: "Sus tareas quedan para cualquiera.", ok: "Quitar", tone: "danger", okIcon: "trash" })) return;
-    await api(`/api/members/${b.dataset.delM}`, { method: "DELETE" });
-    renderHouse();
+    renderChoresAdmin();
   }));
 }
 
@@ -886,10 +1123,6 @@ async function renderHouse() {
   await safe(async () => {
     META = await api("/api/meta");
     setHouse(META);
-    $("#household").value = META.household_size;
-    $("#household-kids").value = META.household_kids;
-    $("#kid-portion").value = String(META.kid_portion);
-    if (!$("#kid-portion").value) $("#kid-portion").value = "0.5";
     $("#house-title").textContent = META.house_name;
     $("#home-link").innerHTML = `${icon("home", 20)} Casa`;
     document.title = `${META.house_name} · Administrar`;

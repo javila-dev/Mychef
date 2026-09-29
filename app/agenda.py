@@ -10,7 +10,9 @@ import calendar
 import datetime as dt
 import re
 
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from . import clock
@@ -36,8 +38,19 @@ def _add_months(day: dt.date, months: int, want_day: int) -> dt.date:
     return dt.date(year, month, min(want_day, calendar.monthrange(year, month)[1]))
 
 
+def skipped(event: Event) -> set[dt.date]:
+    return {dt.date.fromisoformat(x) for x in (event.skip_days or "").split(",") if x.strip()}
+
+
 def occurrences(event: Event, start: dt.date, end: dt.date) -> list[dt.date]:
-    """Los días en que cae el evento entre start y end (incluidos)."""
+    """Los días en que cae el evento entre start y end (incluidos), sin los que se cancelaron."""
+    if event.repeat != "none" and event.repeat_until:
+        end = min(end, event.repeat_until)
+    skip = skipped(event) if event.skip_days else set()
+    return [d for d in _occurrences(event, start, end) if d not in skip]
+
+
+def _occurrences(event: Event, start: dt.date, end: dt.date) -> list[dt.date]:
     if event.repeat == "none":
         return [event.day] if start <= event.day <= end else []
     out: list[dt.date] = []
@@ -132,13 +145,43 @@ def event_out(event: Event, day: dt.date, members: dict[int, Member], today: dt.
         "date": day.isoformat(),
         "first_day": event.day.isoformat(),
         "time": event.time,
-        "time_text": fmt_hour(event.time) if event.time else "Todo el día",
+        "time_text": _time_text(event),
         "day_text": day_text(day, today),
+        "end_date": (day + dt.timedelta(days=span(event))).isoformat(),
+        "end_day": event.end_day.isoformat() if event.end_day else None,
+        "end_time": event.end_time,
         "notes": event.notes,
         "repeat": event.repeat,
         "remind": remind_list(event),
         "done": event.done_on is not None,
+        "google": bool(event.google_id),
+        "single": bool(event.google_series),  # una sola vez de algo que se repite en Google
     }
+
+
+def span(event: Event) -> int:
+    """Cuántos días más dura después del primero (0 = un solo día)."""
+    return max(0, (event.end_day - event.day).days) if event.end_day else 0
+
+
+def _time_text(event: Event) -> str:
+    if not event.time:
+        return "Todo el día"
+    if event.end_time and not event.end_day:
+        return f"{fmt_hour(event.time)} – {fmt_hour(event.end_time)}"
+    return fmt_hour(event.time)
+
+
+def between(session: Session, start: dt.date, end: dt.date, today: dt.date | None = None) -> list[dict]:
+    """Todo lo que cae entre start y end, también lo ya hecho y lo que empezó antes y sigue (para el calendario)."""
+    today = today or clock.today()
+    members = {m.id: m for m in session.exec(select(Member))}
+    out = []
+    for e in session.exec(select(Event)):
+        for d in occurrences(e, start - dt.timedelta(days=span(e)), end):
+            out.append(event_out(e, d, members, today))
+    out.sort(key=lambda x: (x["date"], x["time"] or "00:00", x["title"]))
+    return out
 
 
 def upcoming(session: Session, days: int = 30, today: dt.date | None = None, include_done: bool = False) -> list[dict]:
@@ -234,11 +277,16 @@ def _next_weekday(today: dt.date, wd: int, strict: bool) -> dt.date:
     return today + dt.timedelta(days=ahead)
 
 
-def parse_phrase(o: str, t: str, today: dt.date, members: list[Member]) -> dict | None:
+ALL_DAY = r"\b(todo el dia|sin hora|(a )?cualquier hora|no importa la hora|ninguna hora|no tiene hora)\b"
+
+
+def parse_phrase(o: str, t: str, today: dt.date, members: list[Member], partial: bool = False) -> dict | None:
     """Entiende frases como «recuérdame la cita de Benja con la pediatra el jueves a las 3».
 
     `o` es la frase con tildes y `t` la misma sin tildes (mismas posiciones). Devuelve los datos del
     evento o None si no encuentra el día (entonces se le pregunta a la IA).
+    Con partial=True devuelve lo que encuentre aunque falte el día o el título: sirve para
+    armar el recordatorio por partes («¿para qué día?» → «el jueves»).
     """
     spans: list[tuple[int, int]] = []
 
@@ -271,6 +319,33 @@ def parse_phrase(o: str, t: str, today: dt.date, members: list[Member]) -> dict 
         if 0 <= h <= 23 and 0 <= mins <= 59:
             time = f"{h:02d}:{mins:02d}"
             take(m)
+    if time is None and partial:
+        # Respuesta suelta a «¿a qué hora?»: «las 3», «tres y media», «10 de la mañana», «a las 8 pm»
+        m = re.search(r"^(?:a la |a las |la |las |como a las )?(mediodia|" + NUM[1:-1] + r")(?::(\d{2})| y (media|cuarto|\d{1,2}))?"
+                      r"(?:\s+(?:de la (manana|tarde|noche)|en la (manana|tarde|noche)|(am|pm|a m|p m)))?$", t.strip())
+        if m:
+            if m.group(1) == "mediodia":
+                h, mins = 12, 0
+            else:
+                h = _n(m.group(1)) or 0
+                mins = int(m.group(2)) if m.group(2) else {"media": 30, "cuarto": 15}.get(m.group(3) or "", 0)
+                if m.group(3) and m.group(3).isdigit():
+                    mins = int(m.group(3))
+                period = m.group(4) or m.group(5) or (m.group(6) or "").replace(" ", "")
+                if period in ("tarde", "noche", "pm") and h < 12:
+                    h += 12
+                elif period in ("manana", "am") and h == 12:
+                    h = 0
+                elif not period and 1 <= h <= 6:
+                    h += 12
+            if 0 <= h <= 23 and 0 <= mins <= 59:
+                time = f"{h:02d}:{mins:02d}"
+                take(m)
+    all_day = False
+    m = re.search(ALL_DAY, t)
+    if m:
+        all_day = True
+        take(m)
 
     # ---- repetición
     repeat = "none"
@@ -334,7 +409,7 @@ def parse_phrase(o: str, t: str, today: dt.date, members: list[Member]) -> dict 
                     break
             if day:
                 take(m)
-    if day is None:
+    if day is None and not partial:
         return None
 
     # ---- para quién
@@ -363,7 +438,7 @@ def parse_phrase(o: str, t: str, today: dt.date, members: list[Member]) -> dict 
     title = re.sub(r"\s+", " ", title).strip(" ,.")
     title = re.sub(r"^(que|de|el|la|los|las|hay|tengo|tenemos|tiene)\s+", "", title)
     title = re.sub(r"\s+(el|la|a|para|de|y|que)$", "", title).strip(" ,.")
-    if not title:
+    if not title and not partial:
         return None
     for mem in members:  # la voz llega en minúsculas: «benja» → «Benja»
         title = re.sub(r"\b" + re.escape(mem.name.lower()) + r"\b", mem.name, title)
@@ -375,18 +450,27 @@ def parse_phrase(o: str, t: str, today: dt.date, members: list[Member]) -> dict 
         remind = [1440, 0] if category in ("colegio", "pagos") else [0]
     return {
         "title": title[:80], "category": category, "member_id": member.id if member else None,
-        "day": day, "time": time, "repeat": repeat, "remind": remind,
+        "day": day, "time": time, "repeat": repeat, "remind": remind, "all_day": all_day,
     }
 
 
+def remind_for(category: str, time: str | None) -> list[int]:
+    """Cuándo avisar, según la categoría y si tiene hora."""
+    if time:
+        return [1440, 120] if category == "salud" else [60]
+    return [1440, 0] if category in ("colegio", "pagos") else [0]
+
+
+# Lo que devuelve la IA. Las opciones cerradas van como Literal: con salida estructurada estricta el
+# modelo no puede inventar otra categoría ni otra repetición.
 class EventDraft(BaseModel):
-    ok: bool
-    title: str
-    category: str
-    member: str | None
-    date: str
-    time: str | None
-    repeat: str
+    ok: bool = Field(description="true si la frase pide anotar algo en la agenda familiar")
+    title: str = Field(description="Título corto, sin fecha ni hora")
+    category: Literal["salud", "colegio", "cumpleaños", "pagos", "familia", "otro"]
+    member: str | None = Field(description="Nombre de la persona de la casa, o null")
+    date: str = Field(description="AAAA-MM-DD, o cadena vacía si la frase no dice cuándo")
+    time: str | None = Field(description="HH:MM en 24 horas, o null si no dice hora")
+    repeat: Literal["none", "weekly", "monthly", "yearly"]
 
 
 def parse_with_ai(text: str, today: dt.date, members: list[Member], model: str) -> dict | None:
@@ -401,23 +485,32 @@ devuelve ok = true y:
 - title: corto y claro, en español, sin la fecha ni la hora (p. ej. "Cita con la pediatra").
 - category: una de {", ".join(EVENT_CATEGORIES)}.
 - member: para quién es, uno de: {names}; o null.
-- date: AAAA-MM-DD (si dice un día de la semana, el próximo; nunca en el pasado).
+- date: AAAA-MM-DD (si dice un día de la semana, el próximo; nunca en el pasado). Si la frase NO dice \
+cuándo, déjalo vacío (""): no lo inventes, a la familia se le pregunta.
 - time: HH:MM en 24 horas, o null si no dice hora ("a las 3" sin más = 15:00).
 - repeat: none, weekly, monthly o yearly (los cumpleaños son yearly).
 Si no es algo para la agenda, ok = false y lo demás vacío."""
     draft = ai.openai_parse(model, prompt, EventDraft)
     if not draft.ok:
         return None
+    # Aunque la estructura venga bien, los valores se revisan: lo dudoso se pregunta, no se adivina.
     try:
-        day = dt.date.fromisoformat(draft.date)
+        day = dt.date.fromisoformat(draft.date.strip()) if draft.date.strip() else None
     except ValueError:
-        return None
-    time = draft.time if draft.time and re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", draft.time) else None
-    member = next((m for m in members if m.name.lower() == (draft.member or "").lower()), None)
+        day = None
+    if day and (day < today or day > today + dt.timedelta(days=400)):
+        day = None  # una fecha pasada o absurda: mejor preguntar
+    time = (draft.time or "").strip()
+    time = time if re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", time) else None
+    said = strip_accents((draft.member or "").strip().lower())
+    member = next((m for m in members if strip_accents(m.name.lower()) == said), None)
     category = draft.category if draft.category in EVENT_CATEGORIES else "familia"
+    title = re.sub(r"\s+", " ", draft.title).strip(" .,")
+    if not title:
+        return None
     return {
-        "title": draft.title.strip()[:80] or "Recordatorio", "category": category,
+        "title": (title[:1].upper() + title[1:])[:80], "category": category,
         "member_id": member.id if member else None, "day": day, "time": time,
         "repeat": draft.repeat if draft.repeat in ("none", "weekly", "monthly", "yearly") else "none",
-        "remind": ([1440, 120] if category == "salud" else [60]) if time else [0],
+        "remind": remind_for(category, time), "all_day": False,
     }

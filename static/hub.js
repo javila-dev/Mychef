@@ -5,7 +5,7 @@
 
 import {
   $, $$, addDays, amountForm, api, avatar, bindPeople, peoplePicker, readPeople, bindAmountForm, bindSchedule, cap, CHORE_ICONS, readSchedule, scheduleFields, choreIcon, compressImage, confirmModal, esc, fmtAmount, fmtMoney, house,
-  icon, isoDate, modal, mondayOf, peopleText, PORTION, readAmountForm, safe, setHouse,
+  icon, isoDate, kidPath, kidStar, modal, mondayOf, peopleText, PORTION, prizeArt, prizeForm, prizeRows, readAmountForm, safe, setHouse,
   toPantryLine, toast, withBusy,
 } from "./common.js";
 import {
@@ -28,7 +28,7 @@ let busy = false; // mientras se lee una factura no se vuelve al inicio
 
 const SCREENS = {
   home: renderHome, shopping: renderShopping, what: renderWhat, cook: renderCook, chores: renderChores, agenda: renderAgenda,
-  inventory: renderInventory, invGroup: renderInvGroup, menu: renderMenu,
+  inventory: renderInventory, invGroup: renderInvGroup, menu: renderMenu, kids: renderKids, stars: renderStars,
 };
 
 function go(name, params = {}) {
@@ -42,8 +42,8 @@ function go(name, params = {}) {
 const home = () => go("home");
 const refresh = () => (screen === "home" ? home() : null);
 
-function micButton(extra = "") {
-  return `<button class="mic ${extra}" data-mic aria-label="Hablar">${icon("mic", 28)}<span>Hablar</span></button>`;
+function micButton(extra = "", label = true) {
+  return `<button class="mic ${extra}" data-mic aria-label="Hablar" title="Hablar">${icon("mic", 28)}${label ? "<span>Hablar</span>" : ""}</button>`;
 }
 
 function head(title, back = "Volver al inicio", tools = "") {
@@ -101,8 +101,11 @@ function greeting() {
   const h = new Date().getHours();
   return h < 12 ? "Buenos días" : h < 19 ? "Buenas tardes" : "Buenas noches";
 }
+// «3:45» grande y «p. m.» pequeño al lado (hora de 12 horas, como se dice en Colombia).
 function clock() {
-  return new Date().toLocaleTimeString("es", { hour: "numeric", minute: "2-digit" });
+  const d = new Date();
+  const h = d.getHours() % 12 || 12;
+  return `${h}:${String(d.getMinutes()).padStart(2, "0")}<span class="ampm">${d.getHours() < 12 ? "a. m." : "p. m."}</span>`;
 }
 function daysText(d) {
   return d < 0 ? "ya venció" : d === 0 ? "vence hoy" : d === 1 ? "vence mañana" : `vence en ${d} días`;
@@ -126,16 +129,16 @@ function headLink(act, label) {
   return `<button class="w-link" data-act="${act}">${label}${icon("chevron", 18)}</button>`;
 }
 
-// Una comida de hoy en una sola línea: ícono, plato y cómo estamos. La que sigue va resaltada.
-function mealRow(m, next) {
+// Una comida de hoy en una sola línea: ícono, plato y cómo estamos.
+function mealRow(m) {
   const label = MEAL_LABEL[m.meal_type] ?? m.meal_type;
   const state = m.cooked ? `<span class="m-done">ya se cocinó</span>`
     : m.can_cook ? `<span class="m-ok" aria-label="Tenemos todo">${icon("check", 20)}</span>`
     : `<span class="m-miss" title="Falta: ${esc(m.missing.join(", "))}">${m.missing.length === 1 ? `falta ${esc(m.missing[0].toLowerCase())}` : `faltan ${m.missing.length}`}</span>`;
-  return `<button class="meal-row ${m.cooked ? "done" : ""} ${next ? "next" : ""}" data-meal="${m.id}"
+  return `<button class="meal-row ${m.cooked ? "done" : ""}" data-meal="${m.id}"
       aria-label="${esc(label)}: ${esc(m.recipe.name)}${m.cooked ? ", ya se cocinó" : m.can_cook ? ", tenemos todo" : `, falta ${esc(m.missing.join(", "))}`}">
     <span class="m-ic">${icon(MEAL_ICON[m.meal_type] ?? "plate", 20)}</span>
-    <span class="m-txt">${next ? `<small>${esc(label)} · lo siguiente</small>` : ""}<span class="m-name">${esc(m.recipe.name)}</span></span>
+    <span class="m-txt"><span class="m-name">${esc(m.recipe.name)}</span></span>
     ${state}
   </button>`;
 }
@@ -199,15 +202,15 @@ async function renderHome() {
   const current = PHOTOS[photoIdx];
   const inv = t.inventory ?? {};
   const weekend = [0, 6].includes(new Date().getDay());
-  const pendingMeals = t.meals.filter((m) => !m.cooked);
-  const nextMeal = pendingMeals.find((m) => MEAL_ORDER.indexOf(m.meal_type) >= MEAL_ORDER.indexOf(mealNow())) ?? pendingMeals[0];
 
   app.innerHTML = `
     <div class="home">
       <div class="left">
         <header class="time-block">
-          <div class="clock-row"><div class="clock" id="clock">${clock()}</div>${micButton("on-photo")}
-            <button class="scan-pill" data-act="scan">${icon("camera", 26)}<span>Escanear</span></button></div>
+          <div class="clock-row"><div class="clock" id="clock">${clock()}</div>
+            <div class="round-acts">${micButton("on-photo", false)}
+              <button class="scan-pill" data-act="scan" aria-label="Escanear" title="Escanear">${icon("camera", 30)}</button>
+              <button class="star-pill" data-act="kids" aria-label="Logros de los niños" title="Logros de los niños">${kidStar()}</button></div></div>
           <h1 class="hello">${greeting()}</h1>
           <div class="today-line">${date} · ${esc(META.house_name)}</div>
         </header>
@@ -227,29 +230,29 @@ async function renderHome() {
       <div class="widgets">
         ${firstRun ? `<section class="widget">
           <div class="w-head"><h2 class="w-title">${icon("home", 22)} Bienvenidos</h2></div>
-          <p class="empty-note">Toquen <b>Ajustes</b> (abajo a la derecha) para cargar sus recetas y las personas, <b>Tareas</b> para las tareas de la casa y <b>Fotos</b> para poner fotos de la familia.</p>
+          <div class="w-body"><p class="empty-note">Toquen <b>Ajustes</b> (abajo a la derecha) para cargar sus recetas y las personas, <b>Tareas</b> para las tareas de la casa y <b>Fotos</b> para poner fotos de la familia.</p></div>
         </section>` : ""}
 
         <section class="widget mesa">
           <div class="w-head"><h2 class="w-title">${icon("plate", 22)} Hoy en la mesa</h2>
             ${t.setup.recipes ? headLink("menu", "Semana") : ""}</div>
-          ${t.meals.length ? t.meals.map((m) => mealRow(m, m.id === nextMeal?.id)).join("")
+          <div class="w-body">${t.meals.length ? t.meals.map(mealRow).join("")
           : t.setup.recipes ? `<p class="empty-note">Todavía no hay menú para hoy.</p>
              <div class="w-more"><button class="primary" data-act="menu">${icon("calendar", 20)} Armar el menú de la semana</button></div>`
-          : `<p class="empty-note">Cuando carguen sus recetas, aquí aparece lo que se come hoy.</p>`}
+          : `<p class="empty-note">Cuando carguen sus recetas, aquí aparece lo que se come hoy.</p>`}</div>
         </section>
 
         ${t.agenda?.length ? `<section class="widget">
           <div class="w-head"><h2 class="w-title">${icon("calendar", 22)} Próximos días</h2>${headLink("agenda", "Agenda")}</div>
-          ${t.agenda.slice(0, 2).map((e) => eventRow(e, true)).join("")}
+          <div class="w-body">${t.agenda.map(homeEvent).join("")}</div>
         </section>` : ""}
 
         <section class="widget">
           <div class="w-head"><h2 class="w-title">${icon("broom", 22)} Pendientes de hoy
               ${t.chores.length ? `<small>${pending.length ? `${pending.length} por hacer` : "¡Todo al día!"}</small>` : ""}</h2>
             ${headLink("chores", "Todas")}</div>
-          ${shownChores.length ? shownChores.map(choreRow).join("")
-            : `<p class="empty-note">${t.setup.chores ? "Nada pendiente por hoy." : "Aún no hay tareas. Toquen «Todas» para agregar la primera."}</p>`}
+          <div class="w-body">${shownChores.length ? shownChores.map(choreRow).join("")
+            : `<p class="empty-note">${t.setup.chores ? "Nada pendiente por hoy." : "Aún no hay tareas. Toquen «Todas» para agregar la primera."}</p>`}</div>
         </section>
       </div>
 
@@ -271,12 +274,15 @@ async function renderHome() {
     </div>`;
 
   const ACTS = {
-    scan: scanChooser, receipt: () => startScan("receipt"), shopping: () => go("shopping"), what: () => go("what"),
+    kids: () => go("stars"), scan: scanChooser, receipt: () => startScan("receipt"), shopping: () => go("shopping"), what: () => go("what"),
     ranout: ranOutModal, chores: () => go("chores"), photos: photosModal, agenda: () => go("agenda"),
     inventory: () => go("inventory"), menu: () => go("menu"),
   };
   $$("[data-act]", app).forEach((b) => b.onclick = () => ACTS[b.dataset.act]());
-  $$("[data-ev]", app).forEach((b) => b.onclick = () => go("agenda"));
+  $$("[data-ev]", app).forEach((b) => b.onclick = () => {
+    Object.assign(agendaView, { mode: "month", anchor: b.dataset.date, sel: b.dataset.date });
+    go("agenda");
+  });
   $$("[data-meal]", app).forEach((el) => el.onclick = () => {
     const m = t.meals.find((x) => x.id === +el.dataset.meal);
     go("cook", { recipeId: m.recipe.id, servings: m.servings, kids: m.kids, entryId: m.cooked ? null : m.id });
@@ -284,7 +290,7 @@ async function renderHome() {
   bindChores(t.chores, home);
 }
 
-setInterval(() => { const c = $("#clock"); if (c) c.textContent = clock(); }, 15000);
+setInterval(() => { const c = $("#clock"); if (c) c.innerHTML = clock(); }, 15000);
 setInterval(() => { if (screen === "home" && !busy && !$("dialog.m[open]")) safe(renderHome); }, 5 * 60 * 1000);
 
 // ---------------------------------------------------------------- fotos (ventana)
@@ -338,10 +344,12 @@ function choreRow(c, full = false) {
     : c.turn ? `Le toca a ${avatar(c.turn, 26)} ${esc(c.turn.name)}` : "Cualquiera puede";
   const late = !c.done_today && c.days_late ? ` · <span class="late">atrasada ${c.days_late} día${c.days_late > 1 ? "s" : ""}</span>` : "";
   const next = !c.is_due && !c.done_today ? ` · toca ${esc(c.due_text)}` : "";
+  const kidOf = c.done_today ? c.last_done_by : c.turn;
+  const stars = kidOf?.kid ? starChip(c.stars) : "";
   const when = full ? `<small class="when">${icon("calendar", 16)} ${esc(c.when)}${c.remind_at ? ` · ${icon("speaker", 16)} lo recuerda a las ${esc(fmtHour(c.remind_at))}` : ""}</small>` : "";
   return `<div class="chore ${c.done_today ? "done" : ""}">
     <span class="emo">${choreIcon(c.emoji, 30)}</span>
-    <span class="txt"><strong>${esc(c.name)}</strong><span>${who}${late}${next}</span>${when}</span>
+    <span class="txt"><strong>${esc(c.name)}${stars}</strong><span>${who}${late}${next}</span>${when}</span>
     ${full ? `<button class="edit-round" data-edit-chore="${c.id}" aria-label="Cambiar «${esc(c.name)}»">${icon("pencil", 22)}</button>` : ""}
     <button class="tick-round" data-chore="${c.id}" aria-label="${c.done_today ? "Deshacer" : "Marcar como hecha"}">${icon("check", 30)}</button>
   </div>`;
@@ -378,11 +386,10 @@ function whoModal(chore, members, after) {
           <span class="face">${avatar(m, 64)}</span>${esc(m.name)}${m.id === turn ? `<span class="turn-tag">le tocaba</span>` : ""}</button>`).join("")}
         <button class="person" data-m=""><span class="face">${icon("people", 40)}</span>Entre todos</button>
       </div>`,
-    onOpen: (dlg, close) => $$("[data-m]", dlg).forEach((b) => b.onclick = () => withBusy(b, async () => {
-      await finishChore(chore, b.dataset.m ? +b.dataset.m : null, () => {});
+    onOpen: (dlg, close) => $$("[data-m]", dlg).forEach((b) => b.onclick = () => {
       close();
-      after();
-    })),
+      finishChore(chore, b.dataset.m ? +b.dataset.m : null, after);
+    }),
   });
 }
 
@@ -486,6 +493,22 @@ const EVENT_CATS = {
 const REPEAT_TEXT = { none: "", weekly: "Cada semana", monthly: "Cada mes", yearly: "Cada año" };
 const REMIND_OPTS = [[1440, "El día antes"], [120, "2 horas antes"], [60, "1 hora antes"], [0, "A la hora"]];
 
+// «Próximos días» en el inicio: dos renglones cortos por evento para que quepan varios.
+// «Hoy · 3 pm · Kelly», «Mañana · Todo el día», «Jue 1 · 10:30 am».
+function homeEvent(e) {
+  const todayIso = isoDate(new Date());
+  const d = new Date(`${e.date}T12:00`);
+  const diff = Math.round((d - new Date(`${todayIso}T12:00`)) / 86400000);
+  const day = diff === 0 ? "Hoy" : diff === 1 ? "Mañana"
+    : `${cap(d.toLocaleDateString("es", { weekday: "short" }).replace(".", ""))} ${d.getDate()}`;
+  const when = e.time ? shortHour(e.time) : "Todo el día";
+  const who = e.member && !e.title.toLowerCase().includes(e.member.name.toLowerCase()) ? ` · ${esc(e.member.name)}` : "";
+  return `<button class="home-ev" data-ev="${e.id}" data-date="${e.date}" data-cat="${esc(e.category)}">
+    <strong>${esc(e.title)}</strong>
+    <span><b>${day}</b> · ${when}${who}</span>
+  </button>`;
+}
+
 function eventRow(e, compact = false) {
   const [ic, cls] = EVENT_CATS[e.category] ?? EVENT_CATS.otro;
   const late = e.date < isoDate(new Date());
@@ -497,38 +520,221 @@ function eventRow(e, compact = false) {
   </button>`;
 }
 
-async function renderAgenda() {
-  const [items, members] = await Promise.all([api("/api/events?days=60"), api("/api/members")]);
-  const groups = [];
+// La agenda se ve como un calendario: el mes (con el día elegido al lado), la semana o la lista
+// de lo que viene. Se recuerda cómo la dejaron mientras la pantalla esté abierta.
+const agendaView = { mode: "month", anchor: null, sel: null };
+const WEEKDAYS_SHORT = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+
+function shortHour(t) {
+  const [h, m] = t.split(":").map(Number);
+  return `${h % 12 || 12}${m ? `:${String(m).padStart(2, "0")}` : ""} ${h < 12 ? "am" : "pm"}`;
+}
+const longDay = (iso) => cap(new Date(`${iso}T12:00`).toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" }));
+
+// Cada evento en cada día que ocupa (un viaje de tres días sale en los tres).
+function byDay(items, from, to) {
+  const days = {};
   for (const e of items) {
-    const g = groups.at(-1);
-    if (g && g.date === e.date) g.items.push(e); else groups.push({ date: e.date, label: e.day_text, items: [e] });
+    for (let d = new Date(`${e.date}T12:00`); isoDate(d) <= e.end_date; d = addDays(d, 1)) {
+      const di = isoDate(d);
+      if (di < from || di > to) continue;
+      (days[di] ??= []).push({ ...e, cont: di !== e.date });
+    }
   }
-  const dayName = (iso) => new Date(iso + "T12:00").toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" });
-  app.innerHTML = `${head("Agenda de la familia", "Volver al inicio",
-      `<button class="primary" id="add-ev">${icon("plus", 22)} Agregar</button>`)}
-    ${groups.length ? groups.map((g) => `
+  // Primero lo de todo el día, luego por hora
+  for (const list of Object.values(days)) list.sort((a, b) => (a.time ? 1 : 0) - (b.time ? 1 : 0) || (a.time ?? "").localeCompare(b.time ?? ""));
+  return days;
+}
+
+function googleChip(g) {
+  if (!g?.enabled) return "";
+  const t = g.last_sync ? new Date(g.last_sync).getTime() : NaN;
+  const mins = Number.isNaN(t) ? null : Math.max(0, Math.round((Date.now() - t) / 60000));
+  const when = mins == null ? "sin sincronizar" : mins < 1 ? "al día" : mins < 60 ? `hace ${mins} min` : `hace ${Math.round(mins / 60)} h`;
+  return `<button class="g-chip ${g.error ? "bad" : ""}" id="g-sync" title="${esc(g.error ?? "Sincronizar ahora")}">
+    ${icon(g.error ? "warn" : "undo", 18)}<span>${g.error ? "Google: no se pudo sincronizar" : `Google Calendar · ${when}`}</span></button>`;
+}
+
+async function renderAgenda() {
+  const v = agendaView;
+  const todayIso = isoDate(new Date());
+  v.anchor ??= todayIso;
+  v.sel ??= todayIso;
+  const anchor = new Date(`${v.anchor}T12:00`);
+  let from, to, title;
+  if (v.mode === "month") {
+    const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1, 12);
+    from = isoDate(mondayOf(first));
+    to = isoDate(addDays(mondayOf(first), 41));
+    title = cap(first.toLocaleDateString("es", { month: "long", year: "numeric" }));
+  } else if (v.mode === "week") {
+    const monday = mondayOf(anchor);
+    from = isoDate(monday);
+    to = isoDate(addDays(monday, 6));
+    title = `${monday.getDate()} al ${addDays(monday, 6).toLocaleDateString("es", { day: "numeric", month: "long" })}`;
+  }
+  const [items, members, g] = await Promise.all([
+    v.mode === "list" ? api("/api/events?days=60") : api(`/api/events?start=${from}&end=${to}`),
+    api("/api/members"), api("/api/gcal").catch(() => null),
+  ]);
+  const days = v.mode === "list" ? {} : byDay(items, from, to);
+  const current = v.mode === "month" ? v.anchor.slice(0, 7) === todayIso.slice(0, 7)
+    : v.mode === "week" ? from <= todayIso && todayIso <= to : true;
+
+  const chip = (e) => {
+    const [, cls] = EVENT_CATS[e.category] ?? EVENT_CATS.otro;
+    return e.time && !e.cont
+      ? `<span class="cal-ev timed ${e.done ? "done" : ""}"><i class="${cls}"></i><b>${shortHour(e.time)}</b> ${esc(e.title)}</span>`
+      : `<span class="cal-ev ${cls} ${e.done ? "done" : ""}">${esc(e.title)}</span>`;
+  };
+  // El día elegido, como una agenda: la hora a la izquierda, el color de la categoría y el título con todo el ancho.
+  const hourParts = (t) => {
+    const [h, m] = t.split(":").map(Number);
+    return [`${h % 12 || 12}:${String(m).padStart(2, "0")}`, h < 12 ? "a. m." : "p. m."];
+  };
+  const dayItem = (e) => {
+    const [h, ampm] = e.time && !e.cont ? hourParts(e.time) : [];
+    const meta = [
+      e.cont ? `Sigue desde el ${new Date(`${e.date}T12:00`).toLocaleDateString("es", { day: "numeric", month: "long" })}` : "",
+      e.end_time && e.time && !e.cont ? `Hasta las ${hourParts(e.end_time).join(" ")}` : "",
+      e.end_day && !e.cont ? `Hasta el ${new Date(`${e.end_day}T12:00`).toLocaleDateString("es", { day: "numeric", month: "long" })}` : "",
+      e.member && !e.title.toLowerCase().includes(e.member.name.toLowerCase()) ? `${avatar(e.member, 20)} ${esc(e.member.name)}` : "",
+      e.repeat !== "none" ? REPEAT_TEXT[e.repeat] : "",
+    ].filter(Boolean);
+    return `<div class="day-ev ${e.done ? "done" : ""}" data-cat="${esc(e.category)}">
+      <span class="de-time">${h ? `<b>${h}</b><small>${ampm}</small>` : `<small>${e.cont ? "Sigue" : "Todo el día"}</small>`}
+        ${e.repeat === "none" && !e.cont && !e.done ? `<button class="de-tick" data-done="${e.id}" aria-label="Listo: ${esc(e.title)}">${icon("check", 18)}</button>` : ""}</span>
+      <button class="de-body" data-ev="${e.id}" data-date="${e.date}">
+        <strong>${esc(e.title)}</strong>
+        ${meta.length ? `<span class="de-meta">${meta.map((x) => `<span>${x}</span>`).join("")}</span>` : ""}
+      </button>
+    </div>`;
+  };
+  const dayList = (di) => (days[di] ?? []).map(dayItem).join("") || `<p class="empty-note">Nada anotado.</p>`;
+
+  let body;
+  if (v.mode === "month") {
+    const month = anchor.getMonth();
+    // Seis semanas, salvo que la última sea toda del mes siguiente
+    const weeks = addDays(new Date(`${from}T12:00`), 35).getMonth() === month ? 6 : 5;
+    const cells = [...Array(weeks * 7)].map((_, n) => {
+      const d = addDays(new Date(`${from}T12:00`), n);
+      const di = isoDate(d);
+      const list = days[di] ?? [];
+      return `<button class="cal-cell ${d.getMonth() !== month ? "out" : ""} ${di === todayIso ? "today" : ""} ${di === v.sel ? "sel" : ""} ${di < todayIso ? "past" : ""}"
+          data-day="${di}" aria-label="${esc(longDay(di))}${list.length ? `, ${list.length} en la agenda` : ""}">
+        <span class="cal-num">${d.getDate()}</span>
+        ${list.slice(0, 3).map(chip).join("")}
+        ${list.length > 3 ? `<span class="cal-more">+${list.length - 3} más</span>` : ""}
+        ${list.length ? `<span class="cal-dots">${list.slice(0, 4).map((e) => `<i class="${(EVENT_CATS[e.category] ?? EVENT_CATS.otro)[1]}"></i>`).join("")}</span>` : ""}
+      </button>`;
+    }).join("");
+    const selDate = new Date(`${v.sel}T12:00`);
+    const selName = cap(selDate.toLocaleDateString("es", { weekday: "long" }));
+    const selRest = selDate.toLocaleDateString("es", { day: "numeric", month: "long" });
+    body = `<div class="cal-wrap">
+      <div class="cal-month" id="cal-grid" style="--weeks:${weeks}">
+        ${WEEKDAYS_SHORT.map((w) => `<span class="cal-wd">${w}</span>`).join("")}${cells}
+      </div>
+      <section class="sheet cal-side">
+        <div class="cal-side-head"><h2>${v.sel === todayIso ? "Hoy" : esc(selName)} <small>${esc(v.sel === todayIso ? longDay(v.sel) : selRest)}</small></h2>
+          <button class="round" data-add-day="${v.sel}" aria-label="Agregar este día">${icon("plus", 24)}</button></div>
+        ${dayList(v.sel)}
+      </section></div>`;
+  } else if (v.mode === "week") {
+    body = `<div class="cal-week">${[...Array(7)].map((_, n) => {
+      const di = isoDate(addDays(new Date(`${from}T12:00`), n));
+      const d = new Date(`${di}T12:00`);
+      return `<section class="cal-col ${di === todayIso ? "today" : ""} ${di < todayIso ? "past" : ""}">
+        <div class="cal-col-head"><h2>${esc(cap(d.toLocaleDateString("es", { weekday: "short" }).replace(".", "")))} <span class="cal-num">${d.getDate()}</span></h2>
+          <button class="round" data-add-day="${di}" aria-label="Agregar el ${esc(longDay(di))}">${icon("plus", 20)}</button></div>
+        ${(days[di] ?? []).map((e) => `<button class="cal-card ${(EVENT_CATS[e.category] ?? EVENT_CATS.otro)[1]} ${e.done ? "done" : ""}" data-ev="${e.id}" data-date="${e.date}">
+            <small>${e.cont ? "Sigue" : e.time ? esc(e.time_text) : "Todo el día"}</small>
+            <strong>${esc(e.title)}</strong>
+            ${e.member ? `<span>${avatar(e.member, 20)} ${esc(e.member.name)}</span>` : ""}
+          </button>`).join("")}
+      </section>`;
+    }).join("")}</div>`;
+  } else {
+    const groups = [];
+    for (const e of items) {
+      const last = groups.at(-1);
+      if (last && last.date === e.date) last.items.push(e); else groups.push({ date: e.date, label: e.day_text, items: [e] });
+    }
+    body = groups.length ? groups.map((gr) => `
       <section class="sheet ev-day">
-        <h2>${esc(cap(g.label))}${/^(hoy|mañana|pasado)/.test(g.label) ? ` <small>${esc(dayName(g.date))}</small>` : ""}</h2>
-        ${g.items.map((e) => `<div class="ev-line">${eventRow(e)}
+        <h2>${esc(cap(gr.label))}${/^(hoy|mañana|pasado)/.test(gr.label) ? ` <small>${esc(longDay(gr.date))}</small>` : ""}</h2>
+        ${gr.items.map((e) => `<div class="ev-line">${eventRow(e)}
           ${e.repeat === "none" ? `<button class="tick-round" data-done="${e.id}" aria-label="Ya pasó / listo">${icon("check", 26)}</button>` : ""}</div>`).join("")}
       </section>`).join("")
-    : `<section class="sheet"><p class="empty-note">No hay nada en la agenda para los próximos dos meses.<br>
-        Toquen <b>Agregar</b> o digan «Oye casa, recuérdame la cita de Benja el jueves a las 3».</p></section>`}`;
+      : `<section class="sheet"><p class="empty-note">No hay nada en la agenda para los próximos dos meses.<br>
+          Toquen <b>Agregar</b> o digan «Oye casa, recuérdame la cita de Benja el jueves a las 3».</p></section>`;
+  }
+
+  const seg = (mode, label) => `<button class="${v.mode === mode ? "on" : ""}" data-mode="${mode}" aria-pressed="${v.mode === mode}">${label}</button>`;
+  app.innerHTML = `${head("Agenda de la familia", "Volver al inicio",
+      `<button class="primary" id="add-ev">${icon("plus", 22)} Agregar</button>`)}
+    <div class="menu-bar cal-bar">
+      <div class="week-nav">${v.mode === "list" ? `<strong>Los próximos dos meses</strong>` : `
+        <button class="round" id="prev" aria-label="${v.mode === "month" ? "Mes anterior" : "Semana anterior"}">${icon("back", 24)}</button>
+        <strong>${esc(title)}</strong>
+        <button class="round" id="next" aria-label="${v.mode === "month" ? "Mes siguiente" : "Semana siguiente"}">${icon("chevron", 24)}</button>
+        ${current ? "" : `<button id="now">${icon("undo", 18)} Hoy</button>`}`}
+      </div>
+      <div class="cal-tools">${googleChip(g)}
+        <div class="cal-seg" role="group" aria-label="Cómo ver la agenda">${seg("month", "Mes")}${seg("week", "Semana")}${seg("list", "Lista")}</div></div>
+    </div>
+    ${body}`;
+
   bindBack();
-  $("#add-ev").onclick = () => eventModal(null, members);
+  const again = () => go("agenda");
+  const move = (n) => {
+    const d = v.mode === "month" ? new Date(anchor.getFullYear(), anchor.getMonth() + n, 1, 12) : addDays(anchor, 7 * n);
+    v.anchor = isoDate(d);
+    if (v.mode === "month") v.sel = v.anchor.slice(0, 7) === todayIso.slice(0, 7) ? todayIso : v.anchor;
+    again();
+  };
+  $("#prev")?.addEventListener("click", () => move(-1));
+  $("#next")?.addEventListener("click", () => move(1));
+  $("#now")?.addEventListener("click", () => { v.anchor = v.sel = todayIso; again(); });
+  $$("[data-mode]", app).forEach((b) => b.onclick = () => { v.mode = b.dataset.mode; v.anchor = v.sel; again(); });
+  $$("[data-day]", app).forEach((b) => b.onclick = () => {
+    v.sel = b.dataset.day;
+    if (b.classList.contains("out")) v.anchor = v.sel; // un día del mes de al lado: se pasa a ese mes
+    again();
+  });
+  const grid = $("#cal-grid");
+  if (grid) { // deslizar el dedo para cambiar de mes
+    let x0 = null;
+    grid.addEventListener("pointerdown", (e) => { x0 = e.clientX; });
+    grid.addEventListener("pointerup", (e) => {
+      if (x0 != null && Math.abs(e.clientX - x0) > 80) move(e.clientX < x0 ? 1 : -1);
+      x0 = null;
+    });
+  }
+  $("#add-ev").onclick = () => eventModal(null, members, v.mode === "month" && v.sel >= todayIso ? v.sel : null);
+  $$("[data-add-day]", app).forEach((b) => b.onclick = () => eventModal(null, members, b.dataset.addDay));
   $$("[data-ev]", app).forEach((b) => b.onclick = () => eventModal(items.find((e) => e.id === +b.dataset.ev && e.date === b.dataset.date), members));
   $$("[data-done]", app).forEach((b) => b.onclick = () => withBusy(b, async () => {
     const id = +b.dataset.done;
     await safe(() => api(`/api/events/${id}/done`, { method: "POST" }));
     toast("Listo");
     lastUndo = { steps: [{ method: "POST", url: `/api/events/${id}/undone` }], speak: "Listo, volvió a la agenda." };
-    go("agenda");
+    again();
+  }));
+  $("#g-sync")?.addEventListener("click", (e) => withBusy(e.currentTarget, async () => {
+    try {
+      const r = await api("/api/gcal/sync", { method: "POST" });
+      toast(r.up + r.down ? "Al día con Google Calendar" : "Ya estaba al día");
+    } catch (err) {
+      toast(err.message);
+    }
+    again();
   }));
 }
 
-function eventModal(ev, members) {
-  const e = ev ?? { title: "", category: "familia", member_id: null, first_day: isoDate(new Date()), time: null, repeat: "none", remind: [60], notes: "" };
+function eventModal(ev, members, day = null) {
+  const e = ev ?? { title: "", category: "familia", member_id: null, first_day: day ?? isoDate(new Date()), time: null, repeat: "none", remind: [60], notes: "" };
   const chip = (name, value, label, checked, type = "radio") =>
     `<label><input type="${type}" name="${name}" value="${value}" ${checked ? "checked" : ""}><span>${label}</span></label>`;
   const m = modal({
@@ -542,13 +748,18 @@ function eventModal(ev, members) {
       <div class="form-grid">
         <label class="field">¿Qué día?<input name="day" type="date" required value="${e.first_day ?? e.date}"></label>
         <label class="field">¿A qué hora?<input name="time" type="time" value="${e.time ?? ""}"></label>
+        <label class="field">¿Hasta qué hora?<input name="end_time" type="time" value="${e.end_time ?? ""}"></label>
+        <label class="field">¿Hasta qué día?<input name="end_day" type="date" value="${e.end_day ?? ""}"></label>
       </div>
-      <label class="field">¿Se repite?<select name="repeat">${Object.entries({ none: "No, una sola vez", weekly: "Cada semana", monthly: "Cada mes", yearly: "Cada año" })
-        .map(([k, t]) => `<option value="${k}" ${k === e.repeat ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+      <small class="muted" style="margin-top:-.4rem">«Hasta» es opcional: solo si dura varias horas o varios días (un viaje, unas vacaciones).</small>
+      ${e.single ? `<p class="muted small" style="margin:0">Es una sola vez de algo que se repite en Google Calendar: lo que cambien aquí cambia solo este día.</p>`
+      : `<label class="field">¿Se repite?<select name="repeat">${Object.entries({ none: "No, una sola vez", weekly: "Cada semana", monthly: "Cada mes", yearly: "Cada año" })
+        .map(([k, t]) => `<option value="${k}" ${k === e.repeat ? "selected" : ""}>${t}</option>`).join("")}</select></label>`}
       <div class="field">¿Cuándo avisar en voz alta?<div class="seg">${REMIND_OPTS.map(([v, t]) =>
         chip("remind", v, t, e.remind.includes(v), "checkbox")).join("")}</div>
         <small class="muted">Sin hora, «A la hora» avisa ese día a las 7:30 a. m. y «El día antes», la noche anterior.</small></div>
       <label class="field">Notas <small class="muted">(opcional)</small><textarea name="notes" rows="2" maxlength="300" placeholder="Ej: llevar el carné de vacunas">${esc(e.notes)}</textarea></label>
+      ${e.google ? `<p class="muted small g-note">${icon("calendar", 16)} Está en el calendario de Google de la familia: los cambios se ven también en los celulares.</p>` : ""}
     </form>`,
     actions: [
       ...(ev ? [{ label: "Borrar", tone: "danger", icon: "trash", value: "delete" }] : []),
@@ -556,21 +767,28 @@ function eventModal(ev, members) {
       { label: "Guardar", tone: "primary", icon: "check", onClick: async (dlg) => {
         const f = $("#evf", dlg);
         if (!f.reportValidity()) return false;
+        if (f.end_day.value && f.end_day.value < f.day.value) {
+          toast("El último día no puede ser antes del primero");
+          return false;
+        }
         const data = {
           title: f.title.value, category: f.querySelector("[name=category]:checked").value,
           member_id: +f.querySelector("[name=member]:checked").value || null,
-          day: f.day.value, time: f.time.value || null, repeat: f.repeat.value, notes: f.notes.value,
+          day: f.day.value, time: f.time.value || null, end_time: f.end_time.value || null, end_day: f.end_day.value || null,
+          repeat: f.repeat?.value ?? "none", notes: f.notes.value,
           remind: $$("[name=remind]:checked", f).map((i) => +i.value),
         };
         const ok = await safe(() => api(ev ? `/api/events/${ev.id}` : "/api/events", { method: ev ? "PUT" : "POST", json: data }));
         if (!ok) return false;
+        if (!ev) agendaView.anchor = agendaView.sel = data.day; // el calendario queda en el día que se anotó
         toast(ev ? "Guardado" : "Anotado en la agenda");
       } },
     ],
   });
   m.done.then(async (v) => {
     if (v === "delete") {
-      if (!await confirmModal({ title: "¿Borrar de la agenda?", text: esc(ev.title), ok: "Borrar", tone: "danger", okIcon: "trash" })) return;
+      if (!await confirmModal({ title: e.single ? "¿Borrar solo este día?" : "¿Borrar de la agenda?", text: esc(ev.title),
+        ok: "Borrar", tone: "danger", okIcon: "trash" })) return;
       await safe(() => api(`/api/events/${ev.id}`, { method: "DELETE" }));
     }
     if (v) go("agenda");
@@ -578,23 +796,62 @@ function eventModal(ev, members) {
 }
 
 async function finishChore(chore, memberId, after) {
-  await safe(async () => {
+  const m = TODAY?.members.find((x) => x.id === memberId);
+  // Si la hizo un niño se celebra en grande: se compara cómo iba antes y cómo quedó.
+  const before = m?.kid ? await api(`/api/kids/${memberId}`).catch(() => null) : null;
+  const ok = await safe(async () => {
     await api(`/api/chores/${chore.id}/done`, { method: "POST", json: { member_id: memberId } });
-    const m = TODAY?.members.find((x) => x.id === memberId);
-    toast(m ? `¡Gracias, ${m.name}!` : "¡Gracias!");
+    if (!before) toast(m ? `¡Gracias, ${m.name}!` : "¡Gracias!");
+    return true;
   });
+  const now = ok && before ? await api(`/api/kids/${memberId}`).catch(() => null) : null;
+  if (now) await celebrate(before, now, chore);
   after();
 }
 
+// Filtro de la lista de tareas: "all", "any" (cualquiera puede) o el id de una persona.
+// Se recuerda mientras la pantalla esté abierta, también al marcar o cambiar una tarea.
+let choreFilter = "all";
+
 async function renderChores() {
-  const chores = await api("/api/chores");
+  const [chores, members] = await Promise.all([api("/api/chores"), api("/api/members")]);
   TODAY = TODAY ?? await api("/api/today");
-  app.innerHTML = `${head("Tareas de la casa")}
-    <section class="sheet chores-sheet">${chores.map((c) => choreRow(c, true)).join("")
-      || `<p class="empty-note">Aún no hay tareas. Agreguen la primera: sacar la basura, regar las plantas…</p>`}</section>
+  const kids = members.some((m) => m.kid) ? await api("/api/kids") : [];
+  // De una persona: las que tiene fijas y las de turnos cuando le toca a ella.
+  const mine = (c, id) => c.member_id === id || (c.rotate && c.turn?.id === id);
+  const anyone = (c) => !c.member_id && !c.rotate;
+  if (choreFilter !== "all" && choreFilter !== "any" && !members.some((m) => m.id === choreFilter)) choreFilter = "all";
+  const shown = chores.filter((c) => choreFilter === "all" ? true : choreFilter === "any" ? anyone(c) : mine(c, choreFilter));
+  const chip = (value, label, n, face = "") => `
+    <button class="who-chip ${choreFilter === value ? "on" : ""}" data-filter="${value}" aria-pressed="${choreFilter === value}">
+      ${face}<span>${esc(label)}</span><span class="n">${n}</span></button>`;
+  const anyCount = chores.filter(anyone).length;
+  const person = members.find((m) => m.id === choreFilter);
+  const kid = kids.find((k) => k.member.id === choreFilter);
+  app.innerHTML = `${head("Tareas de la casa", "Volver al inicio",
+      `<button class="kids-btn" data-kids aria-label="Logros de los niños"><i class="ks-24">${kidStar()}</i><span>Logros</span></button>`)}
+    ${members.length && chores.length ? `<div class="who-chips" role="group" aria-label="Ver las tareas de">
+      ${chip("all", "Todas", chores.length)}
+      ${members.map((m) => chip(m.id, m.name, chores.filter((c) => mine(c, m.id)).length, avatar(m, 26))).join("")}
+      ${anyCount ? chip("any", "Cualquiera", anyCount) : ""}
+    </div>` : ""}
+    ${kid ? `<button class="kid-banner" data-kids="${kid.member.id}">
+      <span class="kb-star"><i class="ks-32">${kidStar()}</i><b>${kid.stars}</b></span>
+      <span class="kb-txt"><strong>${kid.goal ? `Juntando para: ${esc(kid.goal.name)}` : `${esc(kid.member.name)} va en el nivel ${kid.level.number}`}</strong>
+        <span>${kid.goal ? (kid.goal.ready ? "¡Ya le alcanza para el premio!" : `${kid.goal.stars - kid.stars === 1 ? "Le falta" : "Le faltan"} ${plural(kid.goal.stars - kid.stars, "estrella", "estrellas")}`) : "Toquen para ver sus logros"}</span></span>
+      ${kid.goal ? `<span class="kb-prize" aria-hidden="true">${prizeArt(kid.goal, 30)}</span>` : ""}
+      ${icon("chevron", 24)}</button>` : ""}
+    <section class="sheet chores-sheet">${shown.map((c) => choreRow(c, true)).join("")
+      || `<p class="empty-note">${!chores.length ? "Aún no hay tareas. Agreguen la primera: sacar la basura, regar las plantas…"
+        : person ? `${esc(person.name)} no tiene tareas por ahora.` : "No hay tareas para cualquiera."}</p>`}</section>
     <div class="bottom-bar"><button class="primary big" id="add-chore">${icon("plus")} Agregar tarea</button></div>`;
   bindBack();
-  bindChores(chores, () => go("chores"));
+  $$("[data-filter]", app).forEach((b) => b.onclick = () => {
+    choreFilter = ["all", "any"].includes(b.dataset.filter) ? b.dataset.filter : +b.dataset.filter;
+    renderChores();
+  });
+  bindChores(shown, () => go("chores"));
+  $$("[data-kids]", app).forEach((b) => b.onclick = () => go("kids", { id: b.dataset.kids ? +b.dataset.kids : null, back: "chores" }));
   $("#add-chore").onclick = () => choreForm();
   $$("[data-edit-chore]", app).forEach((b) => b.onclick = () => choreForm(chores.find((c) => c.id === +b.dataset.editChore)));
 }
@@ -603,7 +860,10 @@ async function renderChores() {
 async function choreForm(chore = null) {
   const members = await safe(() => api("/api/members"));
   if (!members) return;
-  const c = chore ?? { name: "", emoji: META.chore_emojis[0], member_id: null, rotate: false };
+  const c = chore ?? { name: "", emoji: META.chore_emojis[0], member_id: null, rotate: false, stars: 1 };
+  const starsField = members.some((x) => x.kid) ? `
+      <div class="field">Estrellas que gana un niño o niña<div class="seg">${[[1, "Fácil"], [2, "Normal"], [3, "Grande"]].map(([n, t]) => `
+        <label><input type="radio" name="stars" value="${n}" ${n === (c.stars ?? 1) ? "checked" : ""}><span class="stars-opt">${starRow(n, 18)} ${t}</span></label>`).join("")}</div></div>` : "";
   const who = c.rotate ? "rotate" : c.member_id ? String(c.member_id) : "";
   const whoOpts = [["", "Cualquiera"], ["rotate", "Por turnos"], ...members.map((m) => [String(m.id), m.name])];
   const m = modal({
@@ -616,6 +876,7 @@ async function choreForm(chore = null) {
           <span>${choreIcon(e, 26)}</span></label>`).join("")}</div></div>
       <div class="field">¿A quién le toca?<div class="seg">${whoOpts.map(([v, t]) => `
         <label><input type="radio" name="who" value="${v}" ${v === who ? "checked" : ""}><span>${esc(t)}</span></label>`).join("")}</div></div>
+      ${starsField}
       ${scheduleFields(c)}
     </form>`,
     onOpen: (dlg) => bindSchedule($("#chf", dlg)),
@@ -631,6 +892,7 @@ async function choreForm(chore = null) {
           const body = {
             name: f.name.value.trim(), emoji: f.emoji.value,
             member_id: w && w !== "rotate" ? +w : null, rotate: w === "rotate", ...readSchedule(f),
+            ...(f.stars ? { stars: +f.stars.value } : {}),
           };
           const ok = await safe(() => api(chore ? `/api/chores/${chore.id}` : "/api/chores", { method: chore ? "PUT" : "POST", json: body }));
           if (!ok) return false;
@@ -648,6 +910,409 @@ async function choreForm(chore = null) {
     toast("Tarea quitada");
   }
   if (v) go("chores");
+}
+
+// ---------------------------------------------------------------- logros de los niños
+// Economía de fichas: cada tarea da estrellas al momento; se juntan para un premio pactado con los papás
+// (mejor experiencias que cosas). Nunca se quitan estrellas por no hacer algo: solo se suma.
+// La tabla de la semana es como la de stickers de la nevera, y las insignias marcan los hitos.
+// A los niños se les habla de «tú»; lo de adultos (premio, canjear) pide una cuenta rápida.
+
+const PRAISE = ["¡Muy bien, {n}!", "¡Lo lograste, {n}!", "¡Qué gran ayuda, {n}!", "¡Excelente trabajo, {n}!", "¡Así se hace, {n}!"];
+const BADGE_TINTS = ["honey", "sky", "lilac", "teal", "clay", "berry", "indigo", "wheat"];
+const reduceMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// «Te falta 1 estrella» / «Te faltan 3 estrellas»
+const missing = (n) => `${n === 1 ? "Te falta" : "Te faltan"} ${plural(n, "estrella", "estrellas")}`;
+
+function starChip(n) {
+  return ` <span class="star-chip" aria-label="${plural(n, "estrella", "estrellas")}"><i class="ks-18">${kidStar()}</i>${n > 1 ? n : ""}</span>`;
+}
+function starRow(n, size = 18) {
+  return `<span class="star-row" aria-hidden="true" style="--s:${size}px">${`<span>${kidStar()}</span>`.repeat(n)}</span>`;
+}
+
+// Lluvia de papelitos por encima de la ventana (va en su propia capa superior con popover).
+function confetti() {
+  if (reduceMotion()) return;
+  const box = document.createElement("div");
+  box.className = "confetti";
+  box.setAttribute("aria-hidden", "true");
+  const tints = ["var(--honey-fill)", "var(--green)", "var(--tint-sky-ink)", "var(--tint-lilac-ink)", "var(--tint-berry-ink)", "var(--tint-teal-ink)"];
+  box.innerHTML = Array.from({ length: 70 }, (_, i) => {
+    const x = Math.random() * 100, delay = Math.random() * 0.6, dur = 2.2 + Math.random() * 1.6;
+    const drift = (Math.random() - 0.5) * 30, spin = 360 + Math.random() * 720;
+    return `<i style="left:${x}vw;background:${tints[i % tints.length]};--drift:${drift}vw;--spin:${spin}deg;animation-delay:${delay}s;animation-duration:${dur}s;${i % 3 ? "" : "border-radius:50%;"}"></i>`;
+  }).join("");
+  box.setAttribute("popover", "manual");
+  document.body.appendChild(box);
+  try { box.showPopover(); } catch { /* sin popover: queda detrás de la ventana, igual se ve al cerrar */ }
+  setTimeout(() => box.remove(), 4200);
+}
+
+// Tocar un premio del camino: la tablet le dice qué es y cuánto le falta (para los que aún no leen).
+function bindPrizeVoice(root, kid) {
+  $$("[data-say-prize]", root).forEach((b) => b.onclick = () => {
+    const p = kid.prizes.find((x) => x.id === +b.dataset.sayPrize);
+    if (!p) return;
+    const left = p.stars - kid.stars;
+    const name = kid.member.name;
+    say(p.claimed ? `${name}, ese ya te lo ganaste: ${p.name}.`
+      : left > 0 ? `${name}, con ${p.stars} estrellas te ganas: ${p.name}. Te ${left === 1 ? "falta una" : `faltan ${left}`}.`
+        : `¡${name}, ya te ganaste: ${p.name}! Pídele a un adulto que te lo dé.`);
+  });
+}
+
+// ¿A qué premio acaba de llegar? (estaba sin alcanzar antes de la tarea y ahora sí)
+const justReached = (before, now) => now.prizes.find((p) => p.ready && !before.prizes.find((x) => x.id === p.id)?.reached);
+
+async function celebrate(before, now, chore) {
+  const name = now.member.name;
+  const gained = Math.max(now.earned - before.earned, chore.stars ?? 1);
+  const praise = PRAISE[Math.floor(Math.random() * PRAISE.length)].replace("{n}", name);
+  const newBadges = now.badges.filter((b) => b.earned && !before.badges.find((x) => x.id === b.id)?.earned);
+  const levelUp = now.level.number > before.level.number;
+  const goal = now.goal;
+  const reached = justReached(before, now);
+  const allDone = now.chores.length > 0 && now.today_done === now.chores.length;
+  const lines = [];
+  if (now.prizes.length) {
+    lines.push(`<div class="cel-goal">
+      <strong>${reached ? `¡Llegaste a: ${esc(reached.name)}!` : goal?.ready ? `Ya puedes pedir: ${esc(goal.name)}` : goal ? `${missing(goal.stars - now.stars)} para: ${esc(goal.name)}` : ""}</strong>
+      ${kidPath(now, { from: before.stars })}</div>`);
+  }
+  newBadges.forEach((b, i) => lines.push(`<div class="cel-badge tint-${BADGE_TINTS[now.badges.indexOf(b) % BADGE_TINTS.length]}" style="--d:${0.6 + i * 0.3}s">
+    <span class="b-ic">${icon(b.icon, 30)}</span><div><small>¡Nueva insignia!</small><strong>${esc(b.name)}</strong></div></div>`));
+  if (levelUp) lines.push(`<p class="cel-level">${icon("medal", 22)} Subiste al nivel ${now.level.number}: <b>${esc(now.level.name)}</b></p>`);
+  if (allDone) lines.push(`<p class="cel-all">${icon("check", 22)} ¡Terminaste todas tus tareas de hoy!</p>`);
+
+  chime();
+  const m = modal({
+    size: "narrow", title: "",
+    body: `<div class="celebrate">
+      <div class="cel-star">${kidStar()}<span class="plus">+${gained}</span></div>
+      <h2>${esc(praise)}</h2>
+      <p class="muted">${esc(chore.name)} · ahora tienes <b>${plural(now.stars, "estrella", "estrellas")}</b></p>
+      ${lines.join("")}
+    </div>`,
+    actions: [{ label: "¡Genial!", tone: "primary" }],
+  });
+  confetti();
+  bindPrizeVoice(m.el, now);
+  const left = goal ? goal.stars - now.stars : 0;
+  const extra = reached ? ` ¡Llegaste a ${reached.name}!` : goal && left > 0 && left <= 3 ? ` Te ${left === 1 ? "falta una estrella" : `faltan ${left} estrellas`} para ${goal.name}.` : newBadges.length ? ` Ganaste la insignia ${newBadges[0].name}.` : allDone ? " Terminaste todas tus tareas de hoy." : "";
+  setTimeout(() => say(`${praise} Ganaste ${gained === 1 ? "una estrella" : `${gained} estrellas`}.${extra}`), 500);
+  const t = setTimeout(() => m.close(), 9000);
+  await m.done;
+  clearTimeout(t);
+  stopSpeaking();
+}
+
+// Lo de adultos (poner el premio, canjearlo, elegir quiénes son niños) pide una cuenta rápida.
+function adultGate() {
+  const a = 6 + Math.floor(Math.random() * 4), b = 6 + Math.floor(Math.random() * 4), ok = a * b;
+  const opts = [...new Set([ok, ok + a, ok - b, ok + 1 + Math.floor(Math.random() * 3)])].sort(() => Math.random() - 0.5);
+  return modal({
+    size: "narrow", title: "Esto lo hace un adulto",
+    body: `<p class="m-text">Para seguir, ¿cuánto es <b>${a} × ${b}</b>?</p>
+      <div class="gate-opts">${opts.map((n) => `<button data-n="${n}">${n}</button>`).join("")}</div>`,
+    onOpen: (dlg, close) => $$("[data-n]", dlg).forEach((btn) => btn.onclick = () => {
+      if (+btn.dataset.n === ok) return close(true);
+      toast("Esa no es. Pídele ayuda a un adulto.");
+      close(false);
+    }),
+  }).done.then((v) => v === true);
+}
+
+let kidSel = null;
+let kidsBack = "chores";
+
+async function renderKids(params = {}) {
+  if (params.back) kidsBack = params.back;
+  const kids = await api("/api/kids");
+  TODAY = TODAY ?? await api("/api/today");
+  const back = () => go(kidsBack);
+  const title = head("Logros", { chores: "Volver a las tareas", stars: "Volver a las estrellas" }[kidsBack] ?? "Volver al inicio",
+    `<button class="kids-btn plain" data-kids-setup aria-label="Ajustes de logros">${icon("sliders", 24)}</button>`);
+  if (!kids.length) {
+    app.innerHTML = `${title}
+      <section class="state-block kids-empty"><span class="empty-star">${kidStar()}</span>
+        <h2>Estrellas para los niños</h2>
+        <p>Cada tarea que hagan les da estrellas. Las juntan para un premio que acuerdan con ustedes,
+          ganan insignias y ven su semana llena de estrellas.</p>
+        <button class="primary big" data-kids-setup>${icon("people")} Elegir quiénes son niños</button></section>`;
+    bindBack(back);
+    $$("[data-kids-setup]", app).forEach((b) => b.onclick = kidsSetup);
+    return;
+  }
+  if (params.id) kidSel = params.id;
+  const k = kids.find((x) => x.member.id === kidSel) ?? kids[0];
+  kidSel = k.member.id;
+  const lv = k.level;
+  const toNext = lv.next != null ? lv.next - k.earned : 0;
+  const earnedBadges = k.badges.filter((b) => b.earned).length;
+  const WEEK = ["L", "M", "X", "J", "V", "S", "D"];
+  const claim = k.claims[0];
+
+  app.innerHTML = `${title}
+    ${kids.length > 1 ? `<div class="who-chips" role="group" aria-label="Ver los logros de">${kids.map((x) => `
+      <button class="who-chip ${x.member.id === kidSel ? "on" : ""}" data-kid="${x.member.id}" aria-pressed="${x.member.id === kidSel}">
+        ${avatar(x.member, 26)}<span>${esc(x.member.name)}</span><span class="n"><i class="ks-18">${kidStar()}</i> ${x.stars}</span></button>`).join("")}</div>` : ""}
+    <div class="kid-grid">
+      <section class="panel prize-panel ${k.goal?.ready ? "ready" : ""}">
+        ${k.prizes.length ? `
+          <div class="prize-head">
+            <div><small>El camino de premios de ${esc(k.member.name)}</small>
+              <strong>${k.goal ? (k.goal.ready ? `¡Llegó a: ${esc(k.goal.name)}!` : `Próximo: ${esc(k.goal.name)}`) : "¡Camino completo!"}</strong></div>
+            <button class="edit-round" data-goal aria-label="Cambiar los premios">${icon("pencil", 20)}</button></div>
+          ${kidPath(k)}
+          <div class="prize-foot">
+            <p class="goal-note">${k.goal?.ready ? "¡Ya te lo ganaste! Pídele a un adulto que te lo dé." : k.goal ? `<b>${missing(k.goal.stars - k.stars)}</b> · toca un premio para escucharlo` : ""}</p>
+            ${k.goal?.ready ? `<button class="primary big claim-btn" data-claim>${icon("gift")} Entregar premio</button>` : ""}
+          </div>`
+        : `<div class="prize-empty">${icon("gift", 56)}
+            <div><strong>Todavía no hay premios</strong>
+              <p class="goal-note">Pongan premios en el camino de ${esc(k.member.name)}: a las 10 estrellas un helado, a las 15 el parque…</p></div>
+            <button class="primary big" data-goal>${icon("plus")} Poner premios</button></div>`}
+        ${claim ? `<p class="small muted last-claim">Último premio: ${esc(claim.name)} · ${fmtShortDay(claim.day)}
+          <button class="link-btn" data-unclaim>Deshacer</button></p>` : ""}
+      </section>
+      <section class="panel kid-hero">
+        <div class="kid-id">${avatar(k.member, 64)}
+          <div><h2>${esc(k.member.name)}</h2>
+            <span class="lvl">${icon("medal", 18)} Nivel ${lv.number} · ${esc(lv.name)}</span></div></div>
+        <div class="kid-stars">
+          <span class="big-star">${kidStar()}</span>
+          <div><strong>${k.stars}</strong><span>${k.stars === 1 ? "estrella" : "estrellas"}</span></div>
+        </div>
+        ${lv.next != null ? `<div class="lvl-bar" role="progressbar" aria-valuemin="${lv.from}" aria-valuemax="${lv.next}" aria-valuenow="${k.earned}" aria-label="Camino al nivel ${lv.number + 1}">
+            <span style="--to:${((k.earned - lv.from) / (lv.next - lv.from)) * 100}%"></span></div>
+          <p class="small muted">${plural(toNext, "estrella más", "estrellas más")} y llegas a <b>${esc(lv.next_name)}</b></p>`
+        : `<p class="small muted">¡Llegaste al nivel más alto!</p>`}
+        <div class="streak ${k.streak ? "on" : ""}">${icon("flame", 30)}
+          <div><strong>${k.streak ? `${plural(k.streak, "día", "días")} ayudando` : "Empieza tu racha hoy"}</strong>
+          <small>${k.best_streak > 1 ? `Tu récord: ${k.best_streak} días. ` : ""}Un día de descanso no la rompe.</small></div></div>
+      </section>
+
+      <section class="panel kid-today">
+        <h3>Tus tareas de hoy ${k.chores.length ? `<small>${k.today_done} de ${k.chores.length}</small>` : ""}</h3>
+        ${k.chores.length ? k.chores.map((c) => `
+          <button class="kid-task ${c.done_today ? "done" : ""}" data-task="${c.id}"
+              aria-label="${esc(c.name)}, ${plural(c.stars, "estrella", "estrellas")}${c.done_today ? ", hecha. Toca para deshacer" : ". Toca cuando la termines"}">
+            <span class="kt-ic">${choreIcon(c.emoji, 36)}</span>
+            <span class="kt-name">${esc(c.name)}${c.days_late ? `<small>quedó pendiente de antes</small>` : ""}</span>
+            <span class="kt-stars">${starRow(c.stars, 20)}</span>
+            <span class="kt-check">${icon("check", 32)}</span>
+          </button>`).join("")
+        : `<p class="empty-note">Hoy no tienes tareas. ¡Día libre!</p>`}
+        <h3>Tu semana</h3>
+        <div class="week-stickers">${k.week.map((d, i) => `
+          <div class="wd ${d.today ? "today" : ""} ${d.future ? "future" : ""} ${d.stars ? "got" : ""}">
+            <span class="wd-name">${WEEK[i]}</span>
+            <span class="sticker" aria-label="${d.stars ? plural(d.stars, "estrella", "estrellas") : "sin estrellas"}">${d.stars ? `${kidStar()}${d.stars > 1 ? `<b>${d.stars}</b>` : ""}` : ""}</span>
+          </div>`).join("")}</div>
+      </section>
+
+      <section class="panel kid-badges">
+        <h3>Insignias <small>${earnedBadges} de ${k.badges.length}</small></h3>
+        <div class="badges">${k.badges.map((b, i) => `
+          <div class="badge-card ${b.earned ? `earned tint-${BADGE_TINTS[i % BADGE_TINTS.length]}` : ""}">
+            <span class="b-ic">${icon(b.earned ? b.icon : "lock", 30)}</span>
+            <strong>${esc(b.name)}</strong>
+            <small>${esc(b.text)}</small>
+            ${b.earned ? "" : `<span class="b-prog" aria-label="${b.progress} de ${b.target}"><span style="--to:${(b.progress / b.target) * 100}%"></span></span>`}
+          </div>`).join("")}</div>
+      </section>
+    </div>`;
+
+  bindBack(back);
+  const again = () => go("kids");
+  $$("[data-kid]", app).forEach((b) => b.onclick = () => { kidSel = +b.dataset.kid; renderKids(); });
+  $$("[data-kids-setup]", app).forEach((b) => b.onclick = kidsSetup);
+  $$("[data-goal]", app).forEach((b) => b.onclick = async () => {
+    if (!await adultGate()) return;
+    await prizesModal(k);
+    again();
+  });
+  bindPrizeVoice(app, k);
+  $$("[data-task]", app).forEach((b) => b.onclick = () => safe(async () => {
+    if (b.getAttribute("aria-busy") === "true") return;
+    const c = k.chores.find((x) => x.id === +b.dataset.task);
+    if (c.done_today) {
+      const ok = await confirmModal({ title: "¿Deshacer?", text: `«${esc(c.name)}» vuelve a quedar pendiente y se quitan sus estrellas.`, ok: "Sí, deshacer", okIcon: "undo" });
+      if (!ok) return;
+      await withBusy(b, () => api(`/api/chores/${c.id}/undo`, { method: "POST" }));
+      return again();
+    }
+    await withBusy(b, () => finishChore(c, k.member.id, again));
+  }));
+  const claimBtn = $("[data-claim]", app);
+  if (claimBtn) claimBtn.onclick = async () => {
+    if (!await adultGate()) return;
+    const ok = await confirmModal({
+      title: "¿Entregar el premio?", ok: "Sí, entregar", okIcon: "gift",
+      text: `${esc(k.member.name)} llegó a «${esc(k.goal.name)}». Sus estrellas no bajan: el camino sigue.`,
+    });
+    if (!ok) return;
+    const res = await safe(() => api(`/api/kids/${k.member.id}/claim`, { method: "POST" }));
+    if (!res) return;
+    chime();
+    const m = modal({
+      size: "narrow", title: "",
+      body: `<div class="celebrate"><div class="cel-prize">${prizeArt(k.goal, 84)}</div>
+        <h2>¡A disfrutar, ${esc(k.member.name)}!</h2>
+        <p class="muted">Te ganaste: <b>${esc(k.goal.name)}</b>.
+          ${res.stars < k.stars ? "¡Completaste todo el camino! Empieza otra vuelta." : res.goal ? `Ahora vas por: <b>${esc(res.goal.name)}</b>.` : ""}</p></div>`,
+      actions: [{ label: "¡Gracias!", tone: "primary", icon: "heart" }],
+    });
+    confetti();
+    setTimeout(() => say(`¡A disfrutar, ${k.member.name}! Te ganaste ${k.goal.name}.`), 400);
+    await m.done;
+    again();
+  };
+  const unclaim = $("[data-unclaim]", app);
+  if (unclaim) unclaim.onclick = async () => {
+    if (!await adultGate()) return;
+    const ok = await confirmModal({ title: "¿Deshacer el último premio?", text: `«${esc(claim.name)}» vuelve a quedar sin entregar.`, ok: "Sí, deshacer", okIcon: "undo" });
+    if (!ok) return;
+    await safe(() => api(`/api/kids/${k.member.id}/claim/undo`, { method: "POST" }));
+    again();
+  };
+}
+
+// ---------------------------------------------------------------- estrellas (la pantalla de los niños)
+// Lo más simple posible, para los que aún no leen: su carita, una barra de estrellas y el premio al
+// final, que crece y se encoge. Tocar el premio o la barra: la tablet dice cuánto falta.
+
+async function renderStars() {
+  const kids = await api("/api/kids");
+  const face = kids.length === 1 && !isPhone() ? 96 : 72; // un solo niño en la tablet: en grande
+  // Las tareas de hoy, para que entienda qué puede hacer y cuántas estrellas le da cada una:
+  // el dibujo, las estrellas dibujadas, un botón de voz y el ✓ para marcarla cuando la termine.
+  const task = (k, c) => `<div class="sb-task ${c.done_today ? "done" : ""}" data-kid="${k.member.id}" data-task="${c.id}">
+      <button type="button" class="st-say" data-say-task aria-label="Escuchar: ${esc(c.name)}">${icon("speaker", 30)}</button>
+      <span class="st-ic">${choreIcon(c.emoji, 56)}</span>
+      <span class="st-name">${esc(c.name)}</span>
+      <span class="st-stars" aria-label="${plural(c.stars, "estrella", "estrellas")}">${`<i>${kidStar()}</i>`.repeat(c.stars)}</span>
+      <button type="button" class="st-done" data-done-task aria-label="${c.done_today ? `${esc(c.name)}: hecha. Tocar para deshacer` : `Ya terminé: ${esc(c.name)}`}">${icon("check", 40)}</button>
+    </div>`;
+  const row = (k) => `<section class="sb-row ${k.goal?.ready ? "ready" : ""}" data-kid="${k.member.id}">
+      <span class="sb-face">${avatar(k.member, face)}</span>
+      ${k.prizes.length ? kidPath(k) : `<button type="button" class="sb-track" data-say="${k.member.id}" aria-label="${esc(k.member.name)}: ${k.stars} estrellas">
+        <div class="sb-empty"><span>${kidStar()}</span><b>${k.stars}</b></div></button>`}
+    </section>
+    <section class="sb-tasks" aria-label="Tareas de hoy de ${esc(k.member.name)}">
+      ${k.chores.length ? [...k.chores].sort((a, b) => a.done_today - b.done_today).map((c) => task(k, c)).join("")
+        : `<button type="button" class="sb-free" data-say-free="${k.member.id}">${icon("sun", 44)}<span>Hoy no hay tareas. ¡Día libre!</span>${icon("speaker", 26)}</button>`}
+    </section>`;
+  app.innerHTML = `${head("Estrellas", "Volver al inicio",
+      kids.length ? `<button class="kids-btn" data-more aria-label="Más logros">${icon("medal", 24)}<span>Más logros</span></button>` : "")}
+    ${kids.length ? `<div class="sb-list ${kids.length === 1 ? "solo" : ""}">${kids.map(row).join("")}</div>
+      ${kids.some((k) => !k.prizes.length) ? `<p class="sb-hint">Para ver los premios en el camino, pónganlos en <b>Ajustes → Premios</b>.</p>` : ""}`
+    : `<section class="state-block"><span class="empty-star">${kidStar()}</span><h2>Estrellas para los niños</h2>
+        <p>Marquen quiénes son niños y pónganles un premio en <b>Ajustes → Premios</b>.</p></section>`}
+`;
+  bindBack();
+  kids.forEach((k) => bindPrizeVoice($(`.sb-row[data-kid="${k.member.id}"]`, app), k));
+  $$("[data-say]", app).forEach((b) => b.onclick = () => {
+    const k = kids.find((x) => x.member.id === +b.dataset.say);
+    say(`${k.member.name}, tienes ${k.stars === 1 ? "una estrella" : `${k.stars} estrellas`}.`);
+  });
+  const find = (el) => {
+    const k = kids.find((x) => x.member.id === +el.closest("[data-kid]").dataset.kid);
+    return [k, k.chores.find((c) => c.id === +el.closest("[data-task]").dataset.task)];
+  };
+  const low = (t) => t.charAt(0).toLowerCase() + t.slice(1);
+  const starsWord = (n) => (n === 1 ? "una estrella" : n === 2 ? "dos estrellas" : `${n} estrellas`);
+  $$("[data-say-task]", app).forEach((b) => b.onclick = () => {
+    const [k, c] = find(b);
+    say(c.done_today ? `¡Muy bien, ${k.member.name}! Ya hiciste: ${low(c.name)}. Ganaste ${starsWord(c.stars)}.`
+      : `${c.name}. Te da ${starsWord(c.stars)}. Cuando termines, toca el chulito verde.`);
+  });
+  $$("[data-say-free]", app).forEach((b) => b.onclick = () => {
+    const k = kids.find((x) => x.member.id === +b.dataset.sayFree);
+    say(`${k.member.name}, hoy no tienes tareas. ¡Día libre!`);
+  });
+  $$("[data-done-task]", app).forEach((b) => b.onclick = () => safe(async () => {
+    if (b.getAttribute("aria-busy") === "true") return;
+    const [k, c] = find(b);
+    const again = () => go("stars");
+    if (c.done_today) {
+      const ok = await confirmModal({ title: "¿Deshacer?", text: `«${esc(c.name)}» vuelve a quedar pendiente y se quitan sus estrellas.`, ok: "Sí, deshacer", okIcon: "undo" });
+      if (!ok) return;
+      await withBusy(b, () => api(`/api/chores/${c.id}/undo`, { method: "POST" }));
+      return again();
+    }
+    TODAY = TODAY ?? await api("/api/today");
+    await withBusy(b, () => finishChore(c, k.member.id, again));
+  }));
+  $("[data-more]", app)?.addEventListener("click", () => go("kids", { back: "stars" }));
+  if (kids.some((k) => k.goal?.ready)) setTimeout(confetti, 500);
+}
+
+// Los premios del camino de un niño: la lista, para cambiar uno o agregar otro. Devuelve al cerrar.
+async function prizesModal(kid) {
+  let k = kid;
+  for (;;) {
+    const draw = (dlg) => {
+      $("#pz", dlg).innerHTML = k.prizes.length ? prizeRows(k) : `<p class="empty-note">Todavía no hay premios.</p>`;
+      $$("[data-claim]", dlg).forEach((b) => b.remove()); // entregar se hace en Logros, frente al niño
+      $$("[data-edit-prize]", dlg).forEach((b) => b.onclick = async () => {
+        if (await prizeForm(k, META.prizes, k.prizes.find((p) => p.id === +b.dataset.editPrize))) {
+          k = await api(`/api/kids/${k.member.id}`);
+          draw(dlg);
+        }
+      });
+    };
+    const m = modal({
+      title: `Premios de ${esc(k.member.name)}`, size: "wide",
+      body: `<p class="m-text" style="margin-bottom:.8rem">Los premios van en el mismo camino de estrellas: al llegar a cada uno, se entrega y sigue al siguiente.</p><div id="pz"></div>`,
+      actions: [
+        { label: "Agregar premio", icon: "plus", value: "add" },
+        { label: "Listo", tone: "primary", icon: "check" },
+      ],
+      onOpen: (dlg) => draw(dlg),
+    });
+    if (await m.done !== "add") return;
+    await prizeForm(k, META.prizes);
+    k = await api(`/api/kids/${k.member.id}`);
+  }
+}
+
+function fmtShortDay(iso) {
+  return new Date(iso + "T12:00").toLocaleDateString("es-CO", { day: "numeric", month: "short" });
+}
+
+// Quiénes son niños: sus tareas dan estrellas y tienen su pantalla de logros.
+async function kidsSetup() {
+  if (!await adultGate()) return;
+  const members = await safe(() => api("/api/members"));
+  if (!members) return;
+  if (!members.length) {
+    return modal({ size: "narrow", title: "Primero, las personas", body: `<p class="m-text">Agreguen a las personas de la casa en <b>Ajustes</b>.</p>`, actions: [{ label: "Entendido", tone: "primary" }] });
+  }
+  const m = modal({
+    title: "¿Quiénes son niños?",
+    body: `<p class="m-text" style="margin-bottom:1rem">Sus tareas les dan estrellas para juntar un premio.
+      Cuántas da cada tarea se elige al cambiar la tarea.</p>
+      <div class="kid-toggles">${members.map((p) => `
+        <label class="kid-toggle"><input type="checkbox" value="${p.id}" ${p.kid ? "checked" : ""}>
+          ${avatar(p, 40)}<span>${esc(p.name)}</span><span class="tg" aria-hidden="true"></span></label>`).join("")}</div>`,
+    actions: [
+      { label: "Cancelar", value: false },
+      {
+        label: "Guardar", tone: "primary", icon: "check",
+        onClick: async (dlg) => {
+          const changed = $$("input[type=checkbox]", dlg).map((i) => [members.find((p) => p.id === +i.value), i.checked]).filter(([p, on]) => p.kid !== on);
+          const ok = await safe(() => Promise.all(changed.map(([p, on]) => api(`/api/members/${p.id}`, { method: "PUT", json: { name: p.name, emoji: p.emoji, kid: on } }))));
+          if (!ok) return false;
+          TODAY = null;
+          return true;
+        },
+      },
+    ],
+  });
+  if (await m.done) go("kids");
 }
 
 // ---------------------------------------------------------------- factura (en una ventana)
@@ -1024,35 +1689,57 @@ function fridgeModal(place = "nevera", remote = null) {
 // ---------------------------------------------------------------- se acabó algo (en una ventana)
 
 async function ranOutModal() {
-  const pantry = await safe(() => api("/api/pantry"));
-  if (!pantry) return;
-  pantry.sort((a, b) => (b.min_quantity != null) - (a.min_quantity != null) || a.name.localeCompare(b.name));
+  // Por páginas para que no se vuelva inmanejable: primero la categoría y luego el producto.
+  // Escribir en el buscador busca en toda la casa, en cualquier página.
+  const inv = await safe(() => api("/api/inventory"));
+  if (!inv) return;
+  const groups = inv.groups.filter((g) => g.items.length);
+  const all = groups.flatMap((g) => g.items);
   const done = new Set();
+  const state = { group: null, text: "" };
   const m = modal({
-    title: "¿Qué se acabó?",
-    body: `<p class="m-text" style="margin-bottom:.9rem">Tóquenlo y queda anotado en la lista de compras.</p>
+    title: "¿Qué falta?",
+    body: `<p class="m-text" style="margin-bottom:.9rem">Toquen lo que se acabó y queda anotado en la lista de compras.</p>
       <div class="search">${icon("search", 22)}<input id="q" placeholder="Buscar o escribir…" autocomplete="off"></div>
-      <div class="tiles" id="tiles"></div>`,
+      <div id="ro"></div>`,
     actions: [{ label: "Listo", tone: "primary", icon: "check" }],
   });
-  const draw = (filter = "") => {
-    const f = filter.trim().toLowerCase();
-    const items = pantry.filter((p) => !f || p.name.toLowerCase().includes(f));
-    const typed = cap(filter.trim());
-    $("#tiles", m.el).innerHTML = items.map((p) => `
-      <button class="tile ${done.has(p.name) ? "done" : ""}" data-name="${esc(p.name)}">${done.has(p.name) ? icon("check", 20) : ""}${esc(p.name)}</button>`).join("")
-      + (f && !items.some((p) => p.name.toLowerCase() === f) ? `<button class="tile" data-name="${esc(typed)}">${icon("plus", 20)} ${esc(typed)}</button>` : "")
-      + (!items.length && !f ? `<p class="empty-note">Escriban lo que se acabó.</p>` : "");
-    $$("#tiles [data-name]", m.el).forEach((b) => b.onclick = () => safe(async () => {
+  const box = $("#ro", m.el);
+  const tile = (name) => `
+    <button class="tile ${done.has(name) ? "done" : ""}" data-name="${esc(name)}">${done.has(name) ? icon("check", 20) : ""}${esc(name)}</button>`;
+  const draw = () => {
+    const f = state.text.trim().toLowerCase();
+    const typed = cap(state.text.trim());
+    if (f) {
+      // Buscando: resultados de todas las categorías, y si no existe, se puede anotar lo escrito.
+      const found = all.filter((p) => p.name.toLowerCase().includes(f));
+      box.innerHTML = `<div class="tiles">${found.map((p) => tile(p.name)).join("")}
+        ${found.some((p) => p.name.toLowerCase() === f) ? "" : `<button class="tile" data-name="${esc(typed)}">${icon("plus", 20)} ${esc(typed)}</button>`}</div>`;
+    } else if (state.group) {
+      const g = groups.find((x) => x.key === state.group);
+      box.innerHTML = `<div class="ro-crumb"><button class="ro-back" data-back-g>${icon("back", 20)} Categorías</button>
+          <span class="inv-ic g-${g.key}">${icon(g.icon, 22)}</span><b>${esc(g.label)}</b></div>
+        <div class="tiles">${g.items.map((p) => tile(p.name)).join("")}</div>`;
+    } else {
+      box.innerHTML = groups.length ? `<div class="ro-groups">${groups.map((g) => `
+          <button class="ro-group g-${g.key}" data-g="${g.key}">
+            <span class="inv-ic">${icon(g.icon, 26)}</span><span class="nm">${esc(g.label)}</span>
+            <span class="n">${[...done].filter((n) => g.items.some((p) => p.name === n)).length ? icon("check", 18) : g.items.length}</span>
+          </button>`).join("")}</div>`
+        : `<p class="empty-note">Todavía no hay nada en el inventario. Escriban lo que se acabó.</p>`;
+    }
+    $$("[data-g]", box).forEach((b) => b.onclick = () => { state.group = b.dataset.g; draw(); });
+    $("[data-back-g]", box)?.addEventListener("click", () => { state.group = null; draw(); });
+    $$("[data-name]", box).forEach((b) => b.onclick = () => safe(async () => {
       const name = b.dataset.name;
       if (done.has(name)) return;
       await withBusy(b, () => api("/api/shopping/ran-out", { method: "POST", json: { name } }));
       done.add(name);
       toast(`Anotado: ${name}`);
-      draw($("#q", m.el).value);
+      draw();
     }));
   };
-  $("#q", m.el).oninput = (e) => draw(e.target.value);
+  $("#q", m.el).oninput = (e) => { state.text = e.target.value; draw(); };
   draw();
   m.done.then(() => { if (done.size) refresh(); });
 }
@@ -1177,31 +1864,65 @@ function menuEntryModal(e, after) {
 // Elegir qué se come: sus recetas, primero las que se pueden hacer con lo que hay.
 async function pickRecipeModal({ day, meal, entry = null }, after) {
   const { adults, kids } = entry ? { adults: entry.servings, kids: entry.kids } : house();
-  let sugg = await safe(() => api(`/api/suggestions?meal_type=${encodeURIComponent(meal)}&servings=${adults}&kids=${kids}&limit=40`));
+  const ask = (extra = "") => api(`/api/suggestions?servings=${adults}&kids=${kids}&day=${day}&limit=500${extra}`);
+  let sugg = await safe(() => ask(`&meal_type=${encodeURIComponent(meal)}`));
   if (!sugg) return;
   // Si ninguna receta está marcada para esa comida, se ofrecen todas (a veces se cena lo del almuerzo).
   const others = !sugg.length;
-  if (others) sugg = await safe(() => api(`/api/suggestions?servings=${adults}&kids=${kids}&limit=40`)) ?? [];
+  if (others) sugg = await safe(() => ask()) ?? [];
   const when = cap(new Date(`${day}T12:00`).toLocaleDateString("es", { weekday: "long", day: "numeric" }));
+  const FILTERS = [["all", "Todas", () => true], ["ok", "Tenemos todo", (s) => s.can_cook], ["fav", "Favoritas", (s) => s.recipe.favorite]];
+  const state = { filter: "all", text: "" };
+  // Hace cuánto estuvo en el menú (antes de ese día): así no se repite lo mismo seguido.
+  const ago = (s) => {
+    const n = s.days_since_menu;
+    if (n == null) return "";
+    const txt = n === 1 ? "ayer" : n < 7 ? `hace ${n} días` : n < 14 ? "hace 1 semana" : n < 60 ? `hace ${Math.floor(n / 7)} semanas` : "hace meses";
+    return `<span class="ago ${n <= 3 ? "recent" : ""}" title="Estuvo en el menú el ${esc(s.last_menu)}">${icon("calendar", 14)} ${txt}</span>`;
+  };
   const m = modal({
     title: entry ? "Cambiar el plato" : `${esc(MEAL_LABEL[meal] ?? meal)} del ${esc(when.toLowerCase())}`,
     size: "wide",
     body: sugg.length ? `${others ? `<p class="m-text" style="margin-bottom:.8rem">No tienen recetas marcadas para ${esc((MEAL_LABEL[meal] ?? meal).toLowerCase())}. Estas son todas las de la casa:</p>` : ""}
-      <div class="choices pick-recipe">${sugg.map((s) => `
-      <button class="choice" data-r="${s.recipe.id}">${icon(s.recipe.favorite ? "star" : "pot", 30)}
-        <span><b>${esc(s.recipe.name)}</b>
-          <small class="${s.can_cook ? "ok" : "miss"}">${s.can_cook ? "Tenemos todo" : `Falta: ${esc(s.missing.map((x) => x.name).join(", "))}`}
-          ${s.uses_expiring.length ? ` · aprovecha ${esc(s.uses_expiring.join(", "))}` : ""}</small></span></button>`).join("")}</div>`
+      <div class="pick-tools">
+        <div class="search">${icon("search", 22)}<input id="rq" placeholder="Buscar receta…" autocomplete="off"></div>
+        <div class="who-chips" role="group" aria-label="Mostrar">${FILTERS.map(([k, label, fn]) => `
+          <button class="who-chip ${k === "all" ? "on" : ""}" data-f="${k}" aria-pressed="${k === "all"}">
+            <span>${label}</span><span class="n">${sugg.filter(fn).length}</span></button>`).join("")}</div>
+      </div>
+      <div class="pick-list" id="pl"></div>`
       : `<div class="state-block">${icon("pot", 44)}<h2>Todavía no hay recetas</h2>
         <p>Se agregan en Ajustes → Recetas.</p></div>`,
   });
-  $$("[data-r]", m.el).forEach((b) => b.onclick = () => safe(async () => {
-    await withBusy(b, () => entry
-      ? api(`/api/menu/${entry.id}`, { method: "PATCH", json: { recipe_id: +b.dataset.r } })
-      : api("/api/menu", { method: "POST", json: { day, meal_type: meal, recipe_id: +b.dataset.r } }));
-    m.close(true);
-    after();
-  }));
+  const list = $("#pl", m.el);
+  const draw = () => {
+    if (!list) return;
+    const fn = FILTERS.find(([k]) => k === state.filter)[2];
+    const q = state.text.trim().toLowerCase();
+    const shown = sugg.filter((s) => fn(s) && (!q || s.recipe.name.toLowerCase().includes(q)));
+    list.innerHTML = shown.map((s) => `
+      <button class="pick-row" data-r="${s.recipe.id}">
+        <span class="pr-ic">${icon(s.recipe.favorite ? "star" : "pot", 22)}</span>
+        <span class="pr-txt"><b>${esc(s.recipe.name)}</b>
+          <small class="${s.can_cook ? "ok" : "miss"}">${s.can_cook ? "Tenemos todo" : `Falta: ${esc(s.missing.map((x) => x.name).join(", "))}`}${
+            s.uses_expiring.length ? ` · aprovecha ${esc(s.uses_expiring.join(", "))}` : ""}</small></span>
+        ${entry && s.recipe.id === entry.recipe.id ? `<span class="ago now">Es el de ahora</span>` : ago(s)}
+      </button>`).join("") || `<p class="empty-note">Ninguna receta coincide.</p>`;
+    $$("[data-r]", list).forEach((b) => b.onclick = () => safe(async () => {
+      await withBusy(b, () => entry
+        ? api(`/api/menu/${entry.id}`, { method: "PATCH", json: { recipe_id: +b.dataset.r } })
+        : api("/api/menu", { method: "POST", json: { day, meal_type: meal, recipe_id: +b.dataset.r } }));
+      m.close(true);
+      after();
+    }));
+  };
+  $("#rq", m.el)?.addEventListener("input", (e) => { state.text = e.target.value; draw(); });
+  $$("[data-f]", m.el).forEach((b) => b.onclick = () => {
+    state.filter = b.dataset.f;
+    $$("[data-f]", m.el).forEach((x) => { x.classList.toggle("on", x === b); x.setAttribute("aria-pressed", String(x === b)); });
+    draw();
+  });
+  draw();
 }
 
 // ---------------------------------------------------------------- ¿qué hay? (revisar la casa)
@@ -1685,6 +2406,8 @@ async function processUtterance(text, ui) {
   ui.title("Entendido");
   const res = await handleVoiceText(text, { box: ui.reply });
   if (!res) return ui.close();
+  // Falta algo del recordatorio («¿para qué día?», «¿a qué hora?»): se vuelve a escuchar sola.
+  if (res.intent === "agenda_ask" && res.data?.pending && !ui.closed) return listenForAnswer(ui);
   if (res.undo && !ui.closed) {
     const act = document.createElement("div");
     act.className = "row";
@@ -1696,6 +2419,31 @@ async function processUtterance(text, ui) {
     setTimeout(() => ui.close(), 9000);
   } else {
     setTimeout(() => ui.close(), res.navigate ? 600 : 2500);
+  }
+}
+
+// Escucha la respuesta a una pregunta de la casa. Si nadie contesta, no se anota nada.
+async function listenForAnswer(ui) {
+  wakeHold("answer");
+  try {
+    ui.title("Te escucho…");
+    $(".mic-wave", ui.m.el).classList.remove("idle");
+    ui.heard("…");
+    let text = "";
+    try { text = await listenOnce({ onInterim: (t) => ui.heard(`«${t}»`) }); } catch { text = ""; }
+    if (ui.closed) { voicePending = null; return; }
+    if (!text) {
+      voicePending = null;
+      ui.idle();
+      ui.title("No escuché nada");
+      ui.heard("No lo anoté. Pueden decirlo de nuevo cuando quieran.");
+      await say("No escuché nada, así que no lo anoté.");
+      setTimeout(() => ui.close(), 2500);
+      return;
+    }
+    await processUtterance(text, ui);
+  } finally {
+    wakeRelease("answer");
   }
 }
 
@@ -1730,7 +2478,7 @@ function voiceModal() {
 
 // ---------------------------------------------------------------- palabra de activación («Oye casa»)
 // Escucha continua mientras la pantalla está abierta. Se pausa cuando otro modo usa el micrófono
-// (botón Hablar, manos libres) y vuelve sola. Se activa por aparato en Ajustes → Casa y tareas.
+// (botón Hablar, manos libres) y vuelve sola. Se activa por aparato en Ajustes → Casa.
 
 const WAKE_KEY = "mychef-wake";
 const wake = { listener: null, ui: null, armTimer: null, holds: new Set(), busy: false };
@@ -1820,8 +2568,13 @@ async function runUndo() {
   if (screen === "home") home();
 }
 
+// Recordatorio a medias que espera una respuesta («¿para qué día?»). Vence al minuto.
+let voicePending = null;
+let voicePendingAt = 0;
+
 async function handleVoiceText(text, { box = null, handsFree: hf = false } = {}) {
   const context = { screen, handsfree: hf, ...(COOK ? { recipe_id: COOK.recipeId, servings: COOK.servings, kids: COOK.kids } : {}) };
+  if (voicePending && Date.now() - voicePendingAt < 60 * 1000) context.pending = voicePending;
   let res;
   try {
     res = await api("/api/voice", { method: "POST", json: { text, context } });
@@ -1830,6 +2583,8 @@ async function handleVoiceText(text, { box = null, handsFree: hf = false } = {})
     return null;
   }
   if (hf && res.intent === "unknown") return null; // en manos libres se ignora lo que no es comando
+  voicePending = res.intent === "agenda_ask" && res.data?.pending ? res.data.pending : null;
+  voicePendingAt = Date.now();
   if (box) { box.hidden = !res.speak; box.textContent = res.speak; }
 
   switch (res.intent) {

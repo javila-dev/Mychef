@@ -131,14 +131,19 @@ def chore_out(chore: Chore, members: list[Member], today: dt.date) -> dict:
         "due_text": due_text(due, today),
         "member_id": chore.member_id,
         "rotate": chore.rotate,
+        "stars": chore.stars or 1,
         "due_on": due.isoformat(),
         "days_late": max((today - due).days, 0),
         "is_due": due <= today,
         "done_today": chore.last_done == today,
         "last_done": chore.last_done.isoformat() if chore.last_done else None,
-        "last_done_by": {"id": by.id, "name": by.name, "emoji": by.emoji} if by else None,
-        "turn": {"id": who.id, "name": who.name, "emoji": who.emoji} if who else None,
+        "last_done_by": person(by) if by else None,
+        "turn": person(who) if who else None,
     }
+
+
+def person(m: Member) -> dict:
+    return {"id": m.id, "name": m.name, "emoji": m.emoji, "kid": m.kid}
 
 
 def list_chores(session: Session, today: dt.date | None = None) -> list[dict]:
@@ -170,7 +175,7 @@ def complete_chore(
     chore.last_done = today
     chore.last_done_by = member_id
     session.add(chore)
-    session.add(ChoreLog(chore_id=chore.id, member_id=member_id, day=today))
+    session.add(ChoreLog(chore_id=chore.id, member_id=member_id, day=today, stars=chore.stars or 1))
     session.flush()
 
 
@@ -341,9 +346,6 @@ def today_summary(session: Session, today: dt.date | None = None) -> dict:
         "chores": chores,
         "shopping_count": len(shopping),
         "low_stock": [i["name"] for i in low_stock(session)],
-        "members": [
-            {"id": m.id, "name": m.name, "emoji": m.emoji}
-            for m in members_by_id(session).values()
-        ],
+        "members": [person(m) for m in members_by_id(session).values()],
     }
 

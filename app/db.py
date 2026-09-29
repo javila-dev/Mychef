@@ -38,6 +38,10 @@ def init_db(eng=engine) -> None:
 
     SQLModel.metadata.create_all(eng)
     _add_missing_columns(eng)
+    from . import rewards  # noqa: PLC0415 (evita importar la app entera al cargar db)
+
+    with Session(eng) as session:
+        rewards.migrate(session)
 
 
 def _add_missing_columns(eng) -> None:

@@ -46,6 +46,10 @@
   --tint-indigo: #e6ecfa; --tint-indigo-ink: #3446a0;
   --tint-stone: #eef0f2; --tint-stone-ink: #374151;
   --alert: #d93025;          /* contador rojo */
+  --star: #ffd23f;           /* la estrella de los niños (relleno); el borde es --honey-fill */
+  --star-ink: #6b3a00;       /* su carita: igual de día y de noche, siempre sobre amarillo */
+  --star-shine: #ffffff;
+  --star-cheek: #ff7a59;
 
   --display: "Lexend", "Segoe UI", system-ui, sans-serif;
   --sans: "Lexend", "Segoe UI", system-ui, sans-serif;
@@ -194,8 +198,6 @@ tr.cat th { font-weight: 600; font-size: .95rem; text-transform: none; letter-sp
 .brand { display: flex; align-items: center; gap: .7rem; }
 .brand h1 { font-size: 1.3rem; }
 .brand small { display: block; font-family: var(--sans); font-size: .78rem; color: var(--muted); font-weight: 400; letter-spacing: 0; }
-.household { font-size: .88rem; color: var(--muted); display: flex; align-items: center; gap: .5rem; font-weight: 500; }
-.household input { width: 4rem; }
 
 .tabs {
   display: flex; gap: .2rem; overflow-x: auto; padding: 0 1.2rem;
@@ -359,5 +361,188 @@ dialog::backdrop { background: rgba(22, 32, 24, .45); animation: fade-in .22s va
 }
 
 /* Cabecera de Administrar: quiénes comen en casa */
-.household label { display: inline-flex; align-items: center; gap: .35rem; }
-.household select { width: auto; padding: .3rem .5rem; }
+
+/* Porciones por comidas: "3 comidas de 2 adultos y 1 niño" + otras líneas */
+.meal-lines { display: grid; gap: .6rem; }
+.meal-line { display: grid; gap: .45rem; padding: .7rem .8rem; border-radius: var(--r); background: var(--paper-2); }
+.ml-top, .ml-who { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem .5rem; }
+.ml-top .ml-word { font-size: 1.1rem; font-weight: 500; }
+.ml-de { color: var(--muted); margin-right: .1rem; }
+.ml-word { color: var(--ink); margin: 0 .5rem 0 .15rem; }
+.ml-step { display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap; }
+.ml-step button { width: 40px; height: 40px; padding: 0 !important; flex: none; border-radius: 50%; background: var(--paper) !important; border-color: transparent !important; }
+.ml-step strong { min-width: 1.6rem; text-align: center; font-size: 1.3rem; font-weight: 500; font-variant-numeric: tabular-nums; }
+.ml-top .ml-step strong { font-size: 1.6rem; }
+.ml-rm { margin-left: auto; width: 40px; height: 40px; padding: 0 !important; border: 0 !important; background: transparent !important; color: var(--muted) !important; }
+.ml-rm[hidden] { display: none; }
+.add-line {
+  display: flex !important; align-items: center; justify-content: center; gap: .4rem; width: 100%; margin-top: .6rem; min-height: 48px;
+  border: 2px dashed var(--line-strong) !important; background: transparent !important; color: var(--green-ink) !important; border-radius: var(--r) !important;
+}
+.meal-total { margin: .6rem 0 0; color: var(--green-ink); font-weight: 500; }
+.meal-total:empty { display: none; }
+
+/* Ajustes: calendario de Google */
+.g-email { padding: .3rem .6rem; border-radius: var(--r-sm); background: var(--paper-2); overflow-wrap: anywhere; user-select: all; }
+.steps { margin: 0; padding-left: 1.2rem; display: grid; gap: .35rem; }
+
+/* Premio de un niño (tablet y Administrar): íconos a color o una foto */
+.prize-img { width: 82%; height: 82%; object-fit: contain; display: block; }
+.prize-img.is-photo { width: 100%; height: 100%; object-fit: cover; }
+.prize-top { display: flex; gap: 1.2rem; align-items: flex-start; }
+.prize-preview {
+  width: 148px; height: 148px; flex: none; border-radius: var(--r-lg); overflow: hidden; display: grid; place-items: center;
+  background: var(--tint-honey); color: var(--tint-honey-ink); box-shadow: inset 0 0 0 3px var(--honey-fill);
+}
+.prize-search input { flex: 1; min-width: 0; }
+.prize-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: .5rem; margin-top: .4rem; }
+.prize-grid.small { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); }
+.prize-tile {
+  display: flex; flex-direction: column; align-items: center; gap: .3rem; padding: .6rem .3rem; height: 100%;
+  border-radius: var(--r); border: 2px solid var(--line); background: var(--paper); font-weight: 400;
+}
+.prize-tile img { width: 48px; height: 48px; }
+.prize-grid.small .prize-tile img { width: 44px; height: 44px; }
+.prize-tile small { font-size: .78rem; font-weight: 500; line-height: 1.2; text-align: center; color: var(--ink); }
+.prize-tile[aria-pressed="true"] { border-color: var(--honey-fill); background: var(--tint-honey); box-shadow: 0 0 0 2px var(--honey-fill); }
+.prize-results { max-height: 260px; overflow: auto; padding: .2rem; border-radius: var(--r); background: var(--paper-2); }
+.prize-results p { margin: .6rem; }
+@media (max-width: 640px) {
+  .prize-top { flex-direction: column; align-items: center; }
+  .prize-top > .stack { width: 100%; }
+}
+.prize-btn { gap: .4rem; padding: .25rem .7rem .25rem .25rem; border-radius: 999px; font-size: .88rem; }
+.prize-mini { width: 30px; height: 30px; border-radius: 50%; overflow: hidden; display: grid; place-items: center; background: var(--tint-honey); color: var(--tint-honey-ink); }
+
+/* Administrar → Premios */
+.kid-checks { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .9rem; }
+.kid-check { display: inline-flex; align-items: center; gap: .45rem; padding: .3rem .7rem .3rem .4rem; border-radius: 999px; background: var(--paper-2); cursor: pointer; }
+.kid-check .avatar { color: #fff; }
+.prize-cards { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); margin-top: 1rem; }
+.prize-card { gap: .9rem; }
+.prize-card.ready { box-shadow: inset 0 0 0 3px var(--honey-fill); }
+.pc-who { font-size: 1.1rem; font-weight: 600; }
+.pc-who .avatar { color: #fff; }
+.prize-card .kid-path { --ss: 26px; }
+@media (max-width: 640px) {
+  .prize-cards { grid-template-columns: 1fr; }
+}
+
+/* La estrella de los niños (sticker): borde miel, relleno claro, carita, cachetes y brillo */
+.kstar { display: block; width: 100%; height: auto; overflow: visible; }
+.kstar polygon { stroke-linejoin: round; }
+.kstar .ks-edge { fill: var(--honey-fill); stroke: var(--honey-fill); stroke-width: 10; }
+.kstar .ks-fill { fill: var(--star); stroke: var(--star); stroke-width: 3; }
+.kstar .ks-shine { fill: none; stroke: var(--star-shine); stroke-width: 3.6; stroke-linecap: round; opacity: .85; }
+.kstar .ks-eye { fill: var(--star-ink); }
+.kstar .ks-smile { fill: none; stroke: var(--star-ink); stroke-width: 2.8; stroke-linecap: round; }
+.kstar .ks-cheek { fill: var(--star-cheek); opacity: .45; }
+.kstar.off .ks-slot { fill: color-mix(in srgb, var(--paper) 60%, transparent); stroke: var(--line-strong); stroke-width: 3.5; stroke-dasharray: 5 5; stroke-linecap: round; }
+
+/* Tamaños fijos para la estrella dentro de botones y textos */
+.ks-18, .ks-22, .ks-24, .ks-32 { display: inline-block; flex: none; vertical-align: middle; font-style: normal; }
+.ks-18 { width: 18px; } .ks-22 { width: 22px; } .ks-24 { width: 26px; } .ks-32 { width: 34px; }
+
+/* Un tono por grupo (fondo del ícono y su trazo), con el mismo contraste que los botones del inicio */
+.g-proteinas  { --g-bg: var(--tint-clay); --g-ink: var(--tint-clay-ink); }
+.g-lacteos    { --g-bg: var(--tint-sky); --g-ink: var(--tint-sky-ink); }
+.g-verduras   { --g-bg: var(--green-soft); --g-ink: var(--green-ink); }
+.g-frutas     { --g-bg: var(--tint-berry); --g-ink: var(--tint-berry-ink); }
+.g-granos     { --g-bg: var(--tint-honey); --g-ink: var(--tint-honey-ink); }
+.g-panaderia  { --g-bg: var(--tint-wheat); --g-ink: var(--tint-wheat-ink); }
+.g-despensa   { --g-bg: var(--tint-lilac); --g-ink: var(--tint-lilac-ink); }
+.g-congelados { --g-bg: var(--tint-teal); --g-ink: var(--tint-teal-ink); }
+.g-bebidas    { --g-bg: var(--tint-indigo); --g-ink: var(--tint-indigo-ink); }
+.g-aseo       { --g-bg: var(--tint-stone); --g-ink: var(--tint-stone-ink); }
+.g-otros      { --g-bg: var(--tint-stone); --g-ink: var(--tint-stone-ink); }
+
+/* Administrar → Despensa: se lee primero, se edita con un toque */
+.p-bar { display: flex; gap: .6rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+.p-search { flex: 1; min-width: 14rem; display: flex; align-items: center; gap: .5rem; padding: 0 .9rem; border-radius: 999px; background: var(--paper); border: 1.5px solid var(--line-strong); color: var(--muted); }
+.p-search input { border: 0; background: none; padding: .7rem 0; flex: 1; min-width: 0; }
+.p-search input:focus-visible { outline: none; }
+.p-search:focus-within { border-color: var(--green); }
+.p-settings { width: 48px; height: 48px; padding: 0 !important; color: var(--muted); }
+@media (max-width: 640px) { .p-search { flex-basis: 100%; } .p-bar > button:not(.p-settings) { flex: 1; } }
+
+.p-attn { margin-bottom: 1rem; background: var(--tint-honey); border-color: transparent; }
+.p-attn.calm { background: var(--green-mist); }
+.p-attn h2 { display: flex; align-items: center; gap: .5rem; margin: 0 0 .7rem; font-size: 1.1rem; color: var(--tint-honey-ink); }
+.p-attn.calm h2 { color: var(--green-ink); margin-bottom: .2rem; }
+.p-chips { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: .5rem; }
+.p-chip { display: inline-flex; align-items: baseline; gap: .45rem; padding: .45rem .9rem; border-radius: 999px; border: 0; background: var(--paper); font-weight: 600; }
+.p-chip small { font-weight: 500; }
+.p-chip.bad small { color: var(--berry); }
+.p-chip.warn small { color: var(--tint-honey-ink); }
+
+.p-groups { columns: 2 340px; column-gap: 1rem; }
+.p-group { break-inside: avoid; margin-bottom: 1rem; padding: .9rem 1.1rem .6rem; }
+.p-group h3 { display: flex; align-items: center; gap: .6rem; margin: 0 0 .4rem; font-size: 1.1rem; }
+.p-group h3 small { margin-left: auto; color: var(--muted); font-weight: 500; font-size: .88rem; }
+.p-gic { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--g-bg); color: var(--g-ink); flex: none; }
+.p-line {
+  width: 100%; display: grid; grid-template-columns: auto 1fr auto; align-items: baseline; gap: .5rem; text-align: left;
+  padding: .6rem .4rem; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: none; font-weight: 400;
+}
+.p-line:hover { background: var(--paper-2); border-color: var(--line); }
+.p-name { font-weight: 500; }
+.p-dots { border-bottom: 2px dotted var(--line-strong); transform: translateY(-.3em); }
+.p-qty { font-weight: 600; color: var(--green-ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.p-extra { grid-column: 1 / -1; color: var(--muted); margin-top: -.2rem; }
+.p-line.soon .p-extra, .p-line.low .p-qty { color: var(--tint-honey-ink); }
+.p-out { padding: .9rem 1.1rem; }
+.p-out summary { cursor: pointer; font-weight: 600; color: var(--muted); }
+.p-out summary small { font-weight: 500; }
+.p-out .p-qty { color: var(--muted); }
+
+.p-toggle { display: flex; align-items: center; gap: .6rem; font-weight: 500; cursor: pointer; }
+.p-toggle input { width: 1.3rem; height: 1.3rem; }
+.p-sub { margin: -.4rem 0 0 1.9rem; }
+.p-sub[hidden], .p-more [hidden] { display: none !important; }
+.p-more summary { cursor: pointer; color: var(--green-ink); font-weight: 500; margin-bottom: .6rem; }
+.p-more[open] { padding-bottom: .2rem; }
+
+/* El camino de premios: estrellas y, en su sitio, cada premio (tablet y Administrar).
+   --ss es el tamaño de la estrella; cada pantalla lo ajusta. */
+.kid-path { --ss: 40px; display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; }
+.kp-star { width: var(--ss); flex: none; }
+.kp-star.new { animation: kp-stamp .55s calc(.3s + var(--d, 0s)) var(--ease-out) both; }
+.kp-star.next { animation: kp-breathe 1.6s ease-in-out infinite; }
+.kp-prize {
+  position: relative; flex: none; display: flex; flex-direction: column; align-items: center; gap: .1rem;
+  width: calc(var(--ss) * 2); padding: .35rem .2rem .25rem !important; margin: 0 .2rem;
+  border: 0 !important; border-radius: var(--r) !important; background: var(--paper) !important; color: var(--tint-honey-ink);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--honey-fill) 45%, transparent), 0 6px 14px -8px color-mix(in srgb, var(--tint-honey-ink) 60%, transparent);
+}
+.kp-art { width: calc(var(--ss) * 1.45); aspect-ratio: 1; display: grid; place-items: center; }
+.kp-art .prize-img { width: 100%; height: 100%; }
+.kp-art .prize-img.is-photo { border-radius: var(--r-sm); }
+.kp-num { display: inline-flex; align-items: center; gap: .15rem; font-size: .88rem; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.kp-num .ks-18 { width: 16px; }
+.kp-check {
+  position: absolute; top: -8px; right: -8px; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--green); color: var(--on-green); box-shadow: 0 0 0 3px var(--paper);
+}
+.kp-prize.done { background: var(--paper-2) !important; box-shadow: none; }
+.kp-prize.done .kp-art { opacity: .5; filter: grayscale(.4); }
+.kp-prize.next { animation: kp-grow 1.8s ease-in-out infinite; box-shadow: 0 0 0 3px color-mix(in srgb, var(--honey-fill) 60%, transparent); }
+.kp-prize.ready { background: var(--paper) !important; box-shadow: 0 0 0 4px var(--honey-fill), 0 12px 26px -12px var(--honey-fill); animation: kp-bounce 1s ease-in-out infinite; }
+@keyframes kp-stamp { 0% { transform: scale(0) rotate(-90deg); } 70% { transform: scale(1.25) rotate(8deg); } }
+@keyframes kp-breathe { 50% { transform: scale(1.08); } }
+@keyframes kp-grow { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }
+@keyframes kp-bounce { 0%, 100% { transform: scale(1) rotate(0); } 25% { transform: scale(1.16) rotate(-4deg); } 75% { transform: scale(1.16) rotate(4deg); } }
+@media (prefers-reduced-motion: reduce) { .kp-star.new, .kp-star.next, .kp-prize.next, .kp-prize.ready { animation: none; } }
+
+/* La lista de premios de un niño: estrella, dibujo, nombre y estado */
+.prize-rows { list-style: none; margin: 0; padding: 0; }
+.prize-rows li { display: flex; align-items: center; gap: .7rem; padding: .5rem 0; }
+.prize-rows li + li { border-top: 1px solid var(--line); }
+.pr-art { width: 44px; height: 44px; flex: none; border-radius: var(--r-sm); overflow: hidden; display: grid; place-items: center; background: var(--tint-honey); color: var(--tint-honey-ink); }
+.pr-num { display: inline-flex; align-items: center; gap: .2rem; min-width: 3.2rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pr-name { flex: 1; min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+.pr-name small { display: block; color: var(--muted); font-weight: 400; }
+.prize-rows li.ready .pr-name small { color: var(--tint-honey-ink); font-weight: 600; }
+.prize-rows li.done .pr-art { opacity: .55; }
+.quick-stars button { padding: .4rem .8rem; border-radius: 999px; }
+.quick-stars button[aria-pressed="true"] { border-color: var(--green); background: var(--green-mist); color: var(--green-ink); }
+

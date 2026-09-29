@@ -103,3 +103,12 @@ def test_voice_agenda(client):
     assert say("recuérdame en diez minutos sacar el pollo")["intent"] == "timer_set"
     assert say("agrega pan a la lista")["intent"] == "list_add"
     assert say("recuérdame algo importante")["intent"] == "agenda_ask"  # sin día y sin IA
+
+
+def test_home_shows_only_what_is_coming(client, monkeypatch):
+    monkeypatch.setattr(clock, "today", lambda: MON)
+    client.post("/api/events", json={"title": "Se me olvidó", "day": "2026-09-27"})
+    client.post("/api/events", json={"title": "Psicólogo", "day": "2026-09-29", "time": "18:00"})
+    assert [e["title"] for e in client.get("/api/today").json()["agenda"]] == ["Psicólogo"]
+    # En la Agenda sí sigue apareciendo, para marcarlo
+    assert "Se me olvidó" in [e["title"] for e in client.get("/api/events").json()]

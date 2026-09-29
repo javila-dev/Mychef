@@ -116,14 +116,25 @@ export function splitPortions(q) {
   const kids = HOUSE.kid > 0 ? Math.round(rest / HOUSE.kid) : 0;
   return Math.abs(kids * HOUSE.kid - rest) < 0.01 ? { adults, kids } : null;
 }
-export function fmtPortions(q) {
-  const n = Number(q) || 0;
-  if (n <= 0) return "No hay";
+// Porciones guardadas -> comidas: primero comidas completas de la casa y lo que sobre, una comida más
+// ("3 comidas de 2 adultos y 1 niño + 1 de 1 adulto y 1 niño").
+export function splitMeals(q) {
+  const n = Math.max(0, Number(q) || 0);
   const meal = portionsOf(HOUSE.adults, HOUSE.kids);
-  const times = meal > 0 ? n / meal : 0;
-  if (times >= 2 && Math.abs(times - Math.round(times)) < 0.01) return `${Math.round(times)} comidas de la casa`;
-  const p = splitPortions(n);
-  return p ? `Para ${peopleText(p.adults, p.kids)}` : `${fmtQty(n)} porciones`;
+  const lines = [];
+  const whole = meal > 0 ? Math.floor(n / meal + 1e-9) : 0;
+  if (whole) lines.push({ meals: whole, adults: HOUSE.adults, kids: HOUSE.kids });
+  const rest = Math.round((n - whole * meal) * 1000) / 1000;
+  if (rest > 0.01) {
+    const p = splitPortions(rest);
+    lines.push(p ? { meals: 1, ...p } : { meals: 1, adults: Math.max(1, Math.round(rest)), kids: 0 });
+  }
+  return lines;
+}
+export function fmtPortions(q) {
+  const lines = splitMeals(q);
+  if (!lines.length) return "No hay";
+  return "Para " + lines.map((l, i) => `${i === 0 ? `${l.meals} comida${l.meals === 1 ? "" : "s"} de ` : "1 de "}${peopleText(l.adults, l.kids)}`).join(" + ");
 }
 
 // Dos contadores grandes: adultos y niños. Se lee con readPeople().
@@ -153,7 +164,8 @@ export const unitStep = (unit) => (["g", "ml"].includes(unit) ? 100 : ["kg", "l"
 // (un contador con − y +). Devuelve { quantity, unit } o null si cancelan.
 export function amountForm(unit, quantity, { withUnit = false, preferPortions = false } = {}) {
   const byPortions = unit === PORTION || (unit == null && preferPortions);
-  const people = (byPortions && quantity != null && splitPortions(quantity)) || { adults: house().adults, kids: house().kids };
+  const lines = byPortions && quantity ? splitMeals(quantity) : [];
+  if (!lines.length) lines.push({ meals: 1, adults: HOUSE.adults, kids: HOUSE.kids });
   const measure = unit && unit !== PORTION ? unit : "unidad";
   const start = byPortions || quantity == null ? unitStep(measure) : quantity;
   return `<div class="amount-form" data-mode="${byPortions ? "portions" : "measure"}">
@@ -162,8 +174,10 @@ export function amountForm(unit, quantity, { withUnit = false, preferPortions = 
       <button type="button" role="radio" data-mode="measure" aria-checked="${!byPortions}">${icon("jar", 20)} Medida</button>
     </div>
     <div class="amt-portions">
-      <p class="m-text">¿Para cuántos alcanza?</p>
-      ${peoplePicker(people.adults, people.kids)}
+      <p class="m-text">¿Para cuántas comidas alcanza?</p>
+      <div class="meal-lines">${lines.map(mealLine).join("")}</div>
+      <button type="button" class="add-line">${icon("plus", 20)} Otras comidas con otras personas</button>
+      <p class="meal-total" aria-live="polite"></p>
     </div>
     <div class="amt-measure">
       <div class="inv-qty">
@@ -176,13 +190,63 @@ export function amountForm(unit, quantity, { withUnit = false, preferPortions = 
     </div>
   </div>`;
 }
+// Una línea de "comidas": cuántas comidas y para quiénes (adultos y niños).
+function mealLine(l) {
+  const step = (key, v, label) => `<span class="ml-step" data-key="${key}">
+    <button type="button" data-ml="-1" aria-label="Menos ${label}">${icon("minus", 20)}</button>
+    <strong>${v}</strong>
+    <button type="button" data-ml="1" aria-label="Más ${label}">${icon("plus", 20)}</button>
+    <span class="ml-word" data-word="${key}"></span></span>`;
+  return `<div class="meal-line">
+    <div class="ml-top">${step("meals", l.meals, "comidas")}
+      <button type="button" class="ml-rm" aria-label="Quitar esta línea">${icon("close", 20)}</button></div>
+    <div class="ml-who"><span class="ml-de">de</span>${step("adults", l.adults, "adultos")}
+      ${step("kids", l.kids, "niños")}</div>
+  </div>`;
+}
+function readMealLines(box) {
+  return $$(".meal-line", box).map((el) => {
+    const v = (k) => +$(`[data-key="${k}"] strong`, el).textContent || 0;
+    return { meals: v("meals"), adults: v("adults"), kids: v("kids") };
+  });
+}
+function bindMealLines(box) {
+  const wrap = $(".meal-lines", box);
+  const sync = () => {
+    $$(".meal-line", wrap).forEach((el) => {
+      const v = (k) => +$(`[data-key="${k}"] strong`, el).textContent || 0;
+      $('[data-word="meals"]', el).textContent = v("meals") === 1 ? "comida" : "comidas";
+      $('[data-word="adults"]', el).textContent = v("adults") === 1 ? "adulto" : "adultos";
+      $('[data-word="kids"]', el).textContent = v("kids") === 1 ? "niño" : "niños";
+      $(".ml-rm", el).hidden = $$(".meal-line", wrap).length < 2;
+    });
+    const total = readMealLines(box).reduce((t, l) => t + l.meals, 0);
+    $(".meal-total", box).textContent = total ? `En total alcanza para ${total} comida${total === 1 ? "" : "s"}.` : "";
+  };
+  const bind = () => {
+    $$("[data-ml]", wrap).forEach((b) => b.onclick = () => {
+      const v = $("strong", b.parentElement);
+      const min = b.closest("[data-key]").dataset.key === "meals" ? 1 : 0;
+      v.textContent = Math.max(min, (+v.textContent || 0) + +b.dataset.ml);
+      sync();
+    });
+    $$(".ml-rm", wrap).forEach((b) => b.onclick = () => { b.closest(".meal-line").remove(); sync(); });
+  };
+  $(".add-line", box).onclick = () => {
+    wrap.insertAdjacentHTML("beforeend", mealLine({ meals: 1, adults: 1, kids: 0 }));
+    bind();
+    sync();
+  };
+  bind();
+  sync();
+}
 export function bindAmountForm(root, unit) {
   const box = $(".amount-form", root);
   $$(".amt-mode [data-mode]", box).forEach((b) => b.onclick = () => {
     box.dataset.mode = b.dataset.mode;
     $$(".amt-mode [data-mode]", box).forEach((x) => x.setAttribute("aria-checked", String(x === b)));
   });
-  bindPeople(box);
+  bindMealLines(box);
   const inp = $(".qv", box);
   $$("[data-d]", box).forEach((b) => b.onclick = () => {
     const u = $(".qu", box)?.value ?? (unit && unit !== PORTION ? unit : "unidad");
@@ -193,8 +257,8 @@ export function bindAmountForm(root, unit) {
 export function readAmountForm(root, unit) {
   const box = $(".amount-form", root);
   if (box.dataset.mode === "portions") {
-    const p = readPeople(box);
-    return { quantity: portionsOf(p.adults, p.kids), unit: PORTION };
+    const quantity = readMealLines(box).reduce((t, l) => t + l.meals * portionsOf(l.adults, l.kids), 0);
+    return { quantity: Math.round(quantity * 1000) / 1000, unit: PORTION };
   }
   const u = $(".qu", box)?.value ?? (unit && unit !== PORTION ? unit : "unidad");
   return { quantity: Math.max(0, parseFloat($(".qv", box).value) || 0), unit: u };
@@ -360,6 +424,12 @@ const ICONS = {
   snow: '<path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9M9.5 4.5 12 7l2.5-2.5M9.5 19.5 12 17l2.5 2.5"/>',
   bottle: '<path d="M10 2.5h4v3.5l1.5 2.5v11a1.5 1.5 0 0 1-1.5 1.5h-4a1.5 1.5 0 0 1-1.5-1.5v-11L10 6z"/><path d="M8.5 12h7"/>',
   half: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17z" fill="currentColor"/>',
+  // Logros de los niños
+  starFill: '<path d="m12 4 2.4 5 5.3.7-3.9 3.7 1 5.3L12 16.2l-4.8 2.5 1-5.3-3.9-3.7 5.3-.7z" fill="currentColor"/>',
+  gift: '<rect x="3.5" y="8.5" width="17" height="4" rx="1"/><path d="M5 12.5v6.5a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5v-6.5M12 8.5v12M12 8.5c-1-2.8-4.8-4.5-5.6-2.3-.6 1.6 1.8 2.3 5.6 2.3zM12 8.5c1-2.8 4.8-4.5 5.6-2.3.6 1.6-1.8 2.3-5.6 2.3z"/>',
+  flame: '<path d="M12 21c-3.6 0-6-2.5-6-5.8 0-4.2 4-6 4.2-10.7 2.8 1.6 4.2 4.3 4 6.8 1-.6 1.6-1.6 1.8-2.8 1.3 1.4 2 3.2 2 5 0 4.2-2.6 7.5-6 7.5z"/><path d="M12 21c-1.5 0-2.5-1.1-2.5-2.5 0-1.8 2.5-2.8 2.5-4.5 1.4 1 2.5 2.4 2.5 4.2 0 1.6-1 2.8-2.5 2.8z"/>',
+  medal: '<circle cx="12" cy="14.5" r="5.5"/><path d="m8.5 10.3-3-6.8h4l2.5 5M15.5 10.3l3-6.8h-4l-1.4 3"/><path d="m12 12 .9 1.8 2 .3-1.4 1.4.3 2-1.8-.9-1.8.9.3-2-1.4-1.4 2-.3z"/>',
+  lock: '<rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>',
 };
 
 // Las tareas se guardan con un emoji (así las crea Administrar); en pantalla se dibujan con íconos propios.
@@ -506,4 +576,196 @@ export function avatar(person, size = 28) {
   const color = AVATAR_COLORS[(person.id ?? 0) % AVATAR_COLORS.length];
   const initial = (person.name || "?").trim().charAt(0).toUpperCase();
   return `<span class="avatar" style="--av:${color};width:${size}px;height:${size}px;font-size:${Math.max(12, Math.round(size * 0.48))}px" aria-hidden="true">${esc(initial)}</span>`;
+}
+
+// La estrella de los niños: gordita, con puntas redondas, carita feliz y un brillo (tipo sticker).
+// Sin ganar: el contorno punteado, como el espacio donde se pega el sticker.
+const STAR_PTS = "32,8 40.2,23.7 57.7,26.7 45.3,39.3 47.9,56.8 32,49 16.1,56.8 18.7,39.3 6.3,26.7 23.8,23.7";
+export function kidStar(on = true) {
+  if (!on) {
+    return `<svg class="kstar off" viewBox="0 0 64 64" aria-hidden="true"><polygon class="ks-slot" points="${STAR_PTS}"/></svg>`;
+  }
+  return `<svg class="kstar" viewBox="0 0 64 64" aria-hidden="true">
+    <polygon class="ks-edge" points="${STAR_PTS}"/><polygon class="ks-fill" points="${STAR_PTS}"/>
+    <path class="ks-shine" d="M19.5 27.5q3.5-4.5 8.5-4.8"/>
+    <circle class="ks-cheek" cx="21.5" cy="41" r="3"/><circle class="ks-cheek" cx="42.5" cy="41" r="3"/>
+    <circle class="ks-eye" cx="26.5" cy="35.5" r="2.7"/><circle class="ks-eye" cx="37.5" cy="35.5" r="2.7"/>
+    <path class="ks-smile" d="M27.5 41.5q4.5 4.6 9 0"/></svg>`;
+}
+
+// ---------------------------------------------------------------- premio de un niño
+// Lo usan la tablet (Logros) y Administrar (Premios). Para los que aún no leen, el premio se ve:
+// un ícono a color (los que trae la app o uno buscado en internet) o una foto de verdad.
+
+export function prizeArt(goal, size = 64) {
+  if (!goal?.art) return icon("gift", size);
+  return `<img class="prize-img ${goal.kind === "photo" ? "is-photo" : ""}" src="${esc(goal.art)}" alt="" loading="lazy">`;
+}
+
+// El camino de estrellas con los premios en su sitio: ⭐×10 → 🍦, ⭐×5 → 🛝, ⭐×5 → 🚲.
+// Estrellas ganadas con carita; las que faltan, punteadas. Cada premio: entregado (✓), listo para
+// entregar (salta), el próximo (late suave) o más adelante. `from` = cuántas tenía antes: las nuevas se
+// prenden con animación. Tocar un premio (data-say-prize) sirve para que la tablet lo diga en voz alta.
+export function kidPath(kid, { from = kid.stars } = {}) {
+  const prizes = kid.prizes ?? [];
+  if (!prizes.length) return "";
+  const at = new Map(prizes.map((p) => [p.stars, p]));
+  const nextId = kid.goal?.id;
+  const cells = [];
+  let n = 0;
+  for (let s = 1; s <= kid.path; s++) {
+    const on = s <= kid.stars;
+    const fresh = on && s > from;
+    cells.push(`<span class="kp-star ${on ? "on" : ""} ${fresh ? "new" : ""} ${s === kid.stars + 1 ? "next" : ""}" style="--d:${fresh ? (s - from) * 0.12 : n * 0.03}s">${kidStar(on)}</span>`);
+    n++;
+    const p = at.get(s);
+    if (p) {
+      const state = p.claimed ? "done" : p.ready ? "ready" : p.id === nextId ? "next" : "later";
+      cells.push(`<button type="button" class="kp-prize ${state}" data-say-prize="${p.id}"
+          aria-label="${esc(p.name)}, en la estrella ${p.stars}${p.claimed ? ", ya entregado" : p.ready ? ", ya lo ganó" : ""}">
+        <span class="kp-art">${prizeArt(p, 56)}</span>
+        <span class="kp-num"><i class="ks-18">${kidStar()}</i>${p.stars}</span>
+        ${p.claimed ? `<span class="kp-check" aria-hidden="true">${icon("check", 18)}</span>` : ""}
+      </button>`);
+    }
+  }
+  return `<div class="kid-path" role="img" aria-label="${kid.stars} de ${kid.path} estrellas">${cells.join("")}</div>`;
+}
+
+// Un premio del camino: su imagen (ícono a color, buscado o foto), qué se gana y en qué estrella.
+export function prizeForm(kid, prizes, prize = null) {
+  const k = kid.member;
+  const taken = new Set((kid.prizes ?? []).filter((p) => p.id !== prize?.id).map((p) => p.stars));
+  const last = Math.max(0, ...(kid.prizes ?? []).map((p) => p.stars));
+  const g = prize ?? { name: "", stars: last ? last + 5 : 10, icon: "", art: null, kind: null };
+  const ideas = [...new Set([g.stars, 5, 10, 15, 20, 25, 30, 40, 50, last + 5, last + 10])].filter((n) => n > 0 && !taken.has(n)).sort((a, b) => a - b);
+  let pick = g.art ? { kind: g.kind, icon: g.icon, url: g.art } : null;
+  const tile = (p) => `<button type="button" class="prize-tile" data-icon="${esc(p.icon)}" data-url="${esc(p.url)}" data-name="${esc(p.name ?? "")}"
+      aria-pressed="false" title="${esc(p.name ?? "")}"><img src="${esc(p.url)}" alt="${esc(p.name ?? "")}" loading="lazy">${p.name ? `<small>${esc(p.name)}</small>` : ""}</button>`;
+  const m = modal({
+    title: prize ? `Premio de ${esc(k.name)}` : `Nuevo premio para ${esc(k.name)}`,
+    size: "wide",
+    body: `<form id="gf" class="stack prize-form">
+      <div class="prize-top">
+        <div class="prize-preview" aria-live="polite"></div>
+        <div class="stack" style="gap:.6rem;flex:1;min-width:0">
+          <label class="field">¿Qué se gana? <small class="muted">(la tablet se lo dice en voz alta)</small>
+            <input name="name" required maxlength="60" autocomplete="off" value="${esc(g.name)}" placeholder="Ej: Un helado el domingo"></label>
+          <div class="field">¿En qué estrella del camino se gana?
+            <div class="row" style="gap:.5rem;flex-wrap:wrap;align-items:center">
+              <input name="stars" type="number" min="1" max="500" required value="${g.stars}" style="width:6rem">
+              <span class="seg quick-stars">${ideas.slice(0, 7).map((n) => `<button type="button" data-n="${n}">${n}</button>`).join("")}</span>
+            </div>
+            ${taken.size ? `<small class="muted">Ya hay premios en: ${[...taken].sort((a, b) => a - b).join(", ")} estrellas.</small>` : ""}
+          </div>
+        </div>
+      </div>
+      <div class="field">Buscar un dibujo a color <small class="muted">(en español: helado, dinosaurio, playa, unicornio…)</small>
+        <div class="row prize-search"><input name="q" type="search" autocomplete="off" placeholder="¿Qué le gusta a ${esc(k.name)}?">
+          <button type="button" data-search>${icon("search", 20)} Buscar</button></div></div>
+      <div class="prize-results" hidden></div>
+      <div class="field">O elijan uno de estos
+        <div class="prize-grid">${prizes.map(tile).join("")}</div></div>
+      <div class="row" style="gap:.6rem;flex-wrap:wrap;align-items:center">
+        <label class="btn">${icon("camera", 20)} Usar una foto del premio de verdad
+          <input type="file" name="photo" accept="image/*" capture="environment" hidden></label>
+        <small class="muted">Íconos: Fluent Emoji (Microsoft) y Noto Emoji (Google), de uso libre.</small>
+      </div>
+    </form>`,
+    onOpen: (dlg) => {
+      const f = $("#gf", dlg);
+      const preview = $(".prize-preview", dlg);
+      const results = $(".prize-results", dlg);
+      let lastAuto = g.name;
+      let objectUrl = null;
+      const draw = () => {
+        preview.innerHTML = pick?.url ? `<img class="prize-img ${pick.kind === "photo" ? "is-photo" : ""}" src="${esc(pick.url)}" alt="">` : icon("gift", 64);
+        $$(".prize-tile", dlg).forEach((t) => t.setAttribute("aria-pressed", String(pick?.kind === "icon" && t.dataset.icon === pick.icon)));
+        $$(".quick-stars [data-n]", dlg).forEach((b) => b.setAttribute("aria-pressed", String(+b.dataset.n === +f.stars.value)));
+      };
+      $$(".quick-stars [data-n]", dlg).forEach((b) => b.onclick = () => { f.stars.value = b.dataset.n; draw(); });
+      f.stars.oninput = draw;
+      const bindTiles = (root) => $$(".prize-tile", root).forEach((t) => t.onclick = () => {
+        pick = { kind: "icon", icon: t.dataset.icon, url: t.dataset.url };
+        // El nombre sugerido reemplaza al anterior solo si nadie lo escribió a mano
+        if (t.dataset.name && (!f.name.value.trim() || f.name.value === lastAuto)) f.name.value = lastAuto = t.dataset.name;
+        draw();
+      });
+      bindTiles(dlg);
+      const search = async () => {
+        const q = f.q.value.trim();
+        if (!q) return f.q.focus();
+        results.hidden = false;
+        results.innerHTML = `<p class="muted">Buscando…</p>`;
+        try {
+          const res = await api(`/api/prize-icons?q=${encodeURIComponent(q)}`);
+          results.innerHTML = res.icons.length
+            ? `<div class="prize-grid small">${res.icons.map((i) => tile({ icon: i.icon, url: i.url })).join("")}</div>`
+            : `<p class="muted">No encontramos «${esc(q)}». Prueben con otra palabra (también sirve en inglés).</p>`;
+          bindTiles(results);
+          draw();
+        } catch (e) {
+          results.innerHTML = `<p class="muted">${esc(e.message)}</p>`;
+        }
+      };
+      $("[data-search]", dlg).onclick = search;
+      f.q.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); search(); } };
+      f.photo.onchange = async () => {
+        const raw = f.photo.files[0];
+        if (!raw) return;
+        const file = await compressImage(raw, 1200, 0.85);
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        objectUrl = URL.createObjectURL(file);
+        pick = { kind: "photo", file, url: objectUrl };
+        draw();
+      };
+      draw();
+    },
+    actions: [
+      ...(prize ? [{ label: "Quitar premio", tone: "danger", icon: "trash", value: "delete" }] : []),
+      { label: "Cancelar", value: false },
+      {
+        label: prize ? "Guardar" : "Agregar premio", tone: "primary", icon: prize ? "check" : "plus",
+        onClick: async (dlg) => {
+          const f = $("#gf", dlg);
+          if (!f.reportValidity()) return false;
+          const body = { name: f.name.value.trim(), stars: +f.stars.value, icon: pick?.kind === "icon" ? pick.icon : "" };
+          const ok = await safe(async () => {
+            const res = prize
+              ? await api(`/api/kids/${k.id}/prizes/${prize.id}`, { method: "PUT", json: body })
+              : await api(`/api/kids/${k.id}/prizes`, { method: "POST", json: body });
+            if (pick?.file) {
+              const id = prize?.id ?? res.prizes.find((p) => p.stars === body.stars)?.id;
+              const fd = new FormData();
+              fd.append("photo", pick.file, "premio.jpg");
+              await api(`/api/kids/${k.id}/prizes/${id}/photo`, { method: "POST", body: fd });
+            }
+            return true;
+          });
+          if (!ok) return false;
+          toast(prize ? "Premio guardado" : `Premio agregado en la estrella ${body.stars}`);
+          return "saved";
+        },
+      },
+    ],
+  });
+  return m.done.then(async (v) => {
+    if (v !== "delete") return v;
+    if (!await confirmModal({ title: "¿Quitar este premio?", text: `«${esc(prize.name)}» sale del camino de ${esc(k.name)}. Sus estrellas no cambian.`, ok: "Quitar", tone: "danger", okIcon: "trash" })) return null;
+    await safe(() => api(`/api/kids/${k.id}/prizes/${prize.id}`, { method: "DELETE" }));
+    return "deleted";
+  });
+}
+
+// La lista de premios de un niño (Administrar y el lápiz de la tablet): en orden de estrellas,
+// con su estado, para cambiar, entregar o agregar otro.
+export function prizeRows(kid) {
+  return `<ol class="prize-rows">${(kid.prizes ?? []).map((p) => `
+    <li class="${p.claimed ? "done" : p.ready ? "ready" : ""}">
+      <span class="pr-art">${prizeArt(p, 34)}</span>
+      <span class="pr-num"><i class="ks-18">${kidStar()}</i>${p.stars}</span>
+      <span class="pr-name">${esc(p.name)}<small>${p.claimed ? "Entregado ✓" : p.ready ? "¡Ya llegó!" : `faltan ${p.stars - kid.stars}`}</small></span>
+      ${p.ready && p.id === kid.goal?.id ? `<button class="primary" data-claim="${kid.member.id}">${icon("gift", 18)} Entregar</button>` : ""}
+      <button class="ghost" data-edit-prize="${p.id}" aria-label="Cambiar «${esc(p.name)}»">${icon("pencil", 18)}</button>
+    </li>`).join("")}</ol>`;
 }

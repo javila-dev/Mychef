@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 
 from . import clock, services
 from .db import engine, init_db
-from .models import Chore, Event, Member, PantryItem, Recipe
+from .models import Chore, Event, Member, PantryItem, Prize, Recipe
 
 EXAMPLES = [
     {
@@ -90,6 +90,11 @@ EQUIVALENCES = {
 
 
 MEMBERS = [("Mamá", "👩"), ("Papá", "👨"), ("Sofi", "👧")]
+KIDS = {"Sofi": [  # niña: su camino de premios (estrellas, premio, dibujo)
+    (10, "Un helado", "fluent-emoji-flat:ice-cream"),
+    (15, "Ir al parque", "fluent-emoji-flat:playground-slide"),
+    (20, "Paseo en bici", "fluent-emoji-flat:bicycle"),
+]}
 CHORES = [
     # (tarea, emoji, horario, persona fija o None, por turnos, recordar a las)
     # horario: número = cada N días; lista = días de la semana (0 = lunes); "mes:N" = día N del mes
@@ -132,9 +137,12 @@ def main() -> None:
             item.min_quantity = minimum  # en la misma unidad en que está guardado
         people = {}
         for name, emoji in MEMBERS:
-            people[name] = Member(name=name, emoji=emoji)
+            people[name] = Member(name=name, emoji=emoji, kid=name in KIDS)
             session.add(people[name])
         session.flush()
+        for name, prizes in KIDS.items():  # su camino de premios: (estrellas, premio, dibujo)
+            for stars, prize_name, icon in prizes:
+                session.add(Prize(member_id=people[name].id, name=prize_name, stars=stars, icon=icon))
         for name, emoji, when, who, rotate, remind in CHORES:
             chore = Chore(name=name, emoji=emoji, member_id=people[who].id if who else None,
                           rotate=rotate, remind_at=remind)

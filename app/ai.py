@@ -17,7 +17,7 @@ import openai
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 log = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
@@ -64,7 +64,7 @@ def _status_error(provider: str, model: str, code: int | None, message: str | No
     if code in (401, 403) or (code == 400 and "api key" in (message or "").lower()):
         return AIError(f"La clave de {provider} no es válida o no tiene permiso.", 503)
     if code == 404:
-        return AIError(f"{provider} no tiene el modelo «{model}». Elijan otro en Ajustes → Casa y tareas.", 400)
+        return AIError(f"{provider} no tiene el modelo «{model}». Elijan otro en Ajustes → Casa.", 400)
     if code == 429:
         return AIError(f"{provider} está recibiendo demasiadas solicitudes o se acabó la cuota; intenten en un momento.", 429)
     if code == 400:
@@ -126,10 +126,18 @@ def openai_parse(model: str, prompt: str, schema: type[T]) -> T:
         raise _status_error("OpenAI", model, e.status_code, e.message) from e
     except openai.APIConnectionError as e:
         raise AIError("No se pudo conectar con OpenAI.") from e
+    except (openai.LengthFinishReasonError, openai.ContentFilterFinishReasonError, openai.APIResponseValidationError,
+            ValidationError, ValueError) as e:
+        # Respuesta cortada, bloqueada o que no cumple la estructura: se trata como "no entendí".
+        log.warning("OpenAI (%s) devolvió algo que no cumple la estructura: %s", model, e)
+        raise AIError("OpenAI no dio una respuesta válida.", 422) from e
+    except openai.OpenAIError as e:
+        raise AIError(f"OpenAI falló: {e}") from e
 
-    if response.output_parsed is None:
+    parsed = getattr(response, "output_parsed", None)
+    if not isinstance(parsed, schema):
         raise AIError("OpenAI no dio una respuesta válida.", 422)
-    return response.output_parsed
+    return parsed
 
 
 # ---------------------------------------------------------------- modelos disponibles

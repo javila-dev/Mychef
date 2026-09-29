@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 from sqlmodel import Session, select
 
-from . import agenda, ai, clock, household, services
+from . import agenda, ai, clock, gcal, household, services
 from .models import Chore, Event, Ingredient, Member, PantryItem, Recipe, ShoppingExtra
 from .units import strip_accents
 
@@ -168,6 +168,12 @@ def interpret(session: Session, text: str, context: dict | None = None, today: d
     if not t:
         return VoiceResult("none", "No escuché nada. Intenten de nuevo.")
 
+    pending = context.get("pending")
+    if isinstance(pending, dict) and pending.get("kind") == "agenda":
+        answered = _agenda_answer(session, o, t, today, pending)
+        if answered is not None:
+            return answered
+
     result = _rules(session, t, context, today, o)
     if result is not None:
         return result
@@ -308,39 +314,101 @@ def _agenda_add(session: Session, o: str, t: str, today: dt.date, ctx: dict) -> 
     if "lista" in t and not re.search(r"\b(agenda|calendario)\b", t):
         return None  # «agrega pan a la lista para mañana» es de la lista de compras
     members = list(session.exec(select(Member)))
-    data = agenda.parse_phrase(o, t, today, members)
-    if data is None and explicit and not ctx.get("handsfree"):
+    data = agenda.parse_phrase(o, t, today, members, partial=True)
+    if data and data["day"] is None and not explicit:
+        return None  # «pon música» no es para la agenda
+    if (data is None or data["day"] is None) and explicit and not ctx.get("handsfree"):
         try:
-            data = agenda.parse_with_ai(o, today, members, ai.model_for(session, "text"))
+            smart = agenda.parse_with_ai(o, today, members, ai.model_for(session, "text"))
         except ai.AIError:
-            data = None
-        if data is None:
-            return VoiceResult(
-                "agenda_ask", "¿Para qué día? Digan, por ejemplo: recuérdame la cita de Benja el jueves a las 3.",
-            )
-    if data is None:
+            smart = None
+        if smart and (data is None or not data["title"] or smart["day"]):
+            data = {**(data or {}), **smart, "all_day": (data or {}).get("all_day", False)}
+    if data is None or not data.get("title"):
+        if explicit:
+            return VoiceResult("agenda_ask", "¿Qué les recuerdo? Digan, por ejemplo: recuérdame llamar a la abuela el jueves a las 3.")
         return None
+    return _agenda_next(session, data, today, members)
+
+
+# Recordatorio a medias: viaja a la tablet y vuelve con la respuesta («¿para qué día?» → «el jueves»).
+def _draft(data: dict) -> dict:
+    return {
+        "kind": "agenda", "title": data["title"], "category": data["category"], "member_id": data["member_id"],
+        "day": data["day"].isoformat() if isinstance(data["day"], dt.date) else data["day"],
+        "time": data["time"], "repeat": data["repeat"], "all_day": data.get("all_day", False),
+        "tries": data.get("tries", 0),
+    }
+
+
+def _agenda_next(session: Session, data: dict, today: dt.date, members: list) -> VoiceResult:
+    """Pregunta lo que falte (primero el día, luego la hora) o, si ya está todo, lo anota."""
+    title = data["title"]
+    if not data["day"]:
+        return VoiceResult("agenda_ask", f"¿Para qué día es «{title}»?",
+                           data={"pending": {**_draft(data), "need": "day"}})
+    needs_time = not data["time"] and not data.get("all_day") and data["category"] != "cumpleaños"
+    if needs_time:
+        return VoiceResult("agenda_ask", "¿A qué hora? O digan «todo el día» o «a cualquier hora».",
+                           data={"pending": {**_draft(data), "need": "time"}})
+    day = data["day"] if isinstance(data["day"], dt.date) else dt.date.fromisoformat(data["day"])
     event = Event(
-        title=data["title"], category=data["category"], member_id=data["member_id"], day=data["day"],
-        time=data["time"], repeat=data["repeat"], remind=",".join(map(str, data["remind"])),
+        title=title, category=data["category"], member_id=data["member_id"], day=day,
+        time=data["time"], repeat=data["repeat"], remind=",".join(map(str, agenda.remind_for(data["category"], data["time"]))),
     )
     session.add(event)
     session.commit()
     session.refresh(event)
+    if gcal.enabled(session):
+        gcal.sync_soon(session.get_bind(), force=True)
     who = next((m.name for m in members if m.id == event.member_id), None)
     who = f" de {who}" if who and who.lower() not in event.title.lower() else ""
     when = agenda.day_text(event.day, today) + (f" {agenda.say_hour(event.time)}" if event.time else "")
     rep_txt = {"weekly": ", cada semana", "monthly": ", cada mes", "yearly": ", cada año"}.get(event.repeat, "")
-    first = data["remind"][0] if data["remind"] else None
-    notice = {1440: " Les aviso el día antes.", 120: " Les aviso el día antes y dos horas antes.",
-              60: " Les aviso una hora antes.", 0: " Les aviso ese día."}.get(first, "")
-    if data["remind"] == [1440, 120]:
-        notice = " Les aviso el día antes y dos horas antes."
+    remind = agenda.remind_for(event.category, event.time)
+    notice = " Les aviso el día antes y dos horas antes." if remind == [1440, 120] else {
+        1440: " Les aviso el día antes.", 60: " Les aviso una hora antes.", 0: " Les aviso ese día."}.get(remind[0], "")
     return VoiceResult(
         "agenda_add", f"Listo, anoté {event.title}{who} para {when}{rep_txt}.{notice}",
         undo={"steps": [{"method": "DELETE", "url": f"/api/events/{event.id}"}], "speak": "Listo, lo quité de la agenda."},
         data={"event_id": event.id, "title": event.title, "date": event.day.isoformat(), "time": event.time},
     )
+
+
+CANCEL = r"^(no|nada|cancela|cancelar|cancelalo|olvidalo|olvida|dejalo|deja asi|ya no|mejor no|no importa)\b"
+
+
+def _agenda_answer(session: Session, o: str, t: str, today: dt.date, pending: dict) -> VoiceResult | None:
+    """La respuesta a «¿para qué día?» o «¿a qué hora?». None si parece otro comando."""
+    if re.search(CANCEL, t) and not re.search(agenda.ALL_DAY, t):
+        return VoiceResult("agenda_cancel", "Listo, no lo anoto.")
+    members = list(session.exec(select(Member)))
+    got = agenda.parse_phrase(o, t, today, members, partial=True) or {}
+    data = {**pending}
+    data["day"] = dt.date.fromisoformat(pending["day"]) if pending.get("day") else None
+    need = pending.get("need")
+    if got.get("day"):
+        data["day"] = got["day"]
+    if got.get("time"):
+        data["time"] = got["time"]
+    if got.get("all_day"):
+        data["all_day"] = True
+    if got.get("repeat", "none") != "none":
+        data["repeat"] = got["repeat"]
+    understood = (need == "day" and data["day"]) or (need == "time" and (data["time"] or data.get("all_day")))
+    if not understood:
+        if re.match(agenda.TRIGGER, t) or len(t.split()) > 6:
+            return None  # dijeron otra cosa: se atiende como un comando nuevo
+        tries = pending.get("tries", 0) + 1
+        if tries >= 2:
+            return VoiceResult("agenda_cancel", "No les entendí, así que no lo anoté. Pueden decirlo de nuevo con el día y la hora.")
+        ask = ("¿Para qué día? Por ejemplo: mañana, el jueves o el 15." if need == "day"
+               else "¿A qué hora? Por ejemplo: a las 3 de la tarde. O digan «todo el día» o «a cualquier hora».")
+        return VoiceResult("agenda_ask", f"No entendí. {ask}", data={"pending": {**pending, "tries": tries}})
+    data["tries"] = 0
+    return _agenda_next(session, data, today, members)
+
+
 
 
 def _say_duration(seconds: int) -> str:

@@ -76,3 +76,16 @@ def test_week_menu_says_what_is_missing(client):
     client.post("/api/pantry", json={"name": "Cerdo", "quantity": 2, "unit": "kg"})
     [e] = client.get("/api/menu", params={"start": TODAY.isoformat(), "days": 1}).json()
     assert (e["can_cook"], e["missing"]) == (True, [])
+
+
+def test_suggestions_say_when_recipe_was_last_on_the_menu(client):
+    import datetime as dt
+    r = _recipe(client)
+    client.post("/api/menu", json={"day": (TODAY - dt.timedelta(days=5)).isoformat(), "meal_type": "almuerzo", "recipe_id": r["id"]})
+    client.post("/api/menu", json={"day": (TODAY - dt.timedelta(days=2)).isoformat(), "meal_type": "almuerzo", "recipe_id": r["id"]})
+    [s] = client.get("/api/suggestions", params={"day": TODAY.isoformat()}).json()
+    assert s["days_since_menu"] == 2
+    [s] = client.get("/api/suggestions", params={"day": (TODAY - dt.timedelta(days=3)).isoformat()}).json()
+    assert s["days_since_menu"] == 2  # desde ese día, la última vez fue hace 2 días (5 días antes de hoy)
+    [s] = client.get("/api/suggestions", params={"day": (TODAY - dt.timedelta(days=6)).isoformat()}).json()
+    assert s["days_since_menu"] is None

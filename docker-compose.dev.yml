@@ -5,6 +5,9 @@
 #
 # Usa puertos distintos a los de siempre para no chocar con otros proyectos (cámbienlos en .env):
 # App:            http://localhost:8001
+#
+# El código (app/ y static/) se monta en vivo: al guardar un archivo la app se reinicia sola.
+# Solo hay que volver a construir (--build) cuando cambia requirements.txt.
 # Consola MinIO:  http://localhost:9003  (usuario y clave: MYCHEF_S3_ACCESS_KEY / MYCHEF_S3_SECRET_KEY)
 # PostgreSQL:     localhost:5433  (mychef / mychef, base mychef)
 
@@ -12,7 +15,13 @@ services:
   mychef:
     ports: !override
       - "${MYCHEF_DEV_PORT:-8001}:8000"
+    volumes:
+      - ./app:/app/app
+      - ./static:/app/static
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     environment:
+      # En Windows y Mac los cambios en carpetas montadas no siempre avisan: se revisa cada tanto
+      - WATCHFILES_FORCE_POLLING=true
       - MYCHEF_DATABASE_URL=postgresql://mychef:mychef@postgres:5432/mychef
       - MYCHEF_S3_ENDPOINT=http://minio:9000
       - MYCHEF_S3_ACCESS_KEY=${MYCHEF_S3_ACCESS_KEY:-mychef}
